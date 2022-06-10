@@ -45,7 +45,7 @@ fn SongDownload<'a>(cx: Scope<'a, SongDownloadProps>) -> Element<'a> {
 
 #[allow(non_snake_case)]
 fn App(cx: Scope) -> Element {
-    let mut library = Library::new("/tmp".into());
+    let mut library = Library::new("/Users/aaron/Music/CrossPlay".into());
     library.load_songs().unwrap();
 
     let library = Arc::new(RwLock::new(library));
