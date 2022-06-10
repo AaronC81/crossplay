@@ -1,4 +1,4 @@
-use std::{sync::RwLockReadGuard, ops::Deref};
+use std::{sync::RwLockReadGuard, ops::Deref, fs::read_dir, ffi::OsString, path::PathBuf};
 
 use async_process::{Command, Output};
 use serde_json::Value;
@@ -14,6 +14,8 @@ pub struct YouTubeDownload {
 pub enum DownloadError {
     IoError(std::io::Error),
     YouTubeDLNonZeroExit(Output),
+    DownloadMissing,
+    DownloadedInvalidFormat(PathBuf),
     LibraryError(LibraryError),
 }
 
@@ -30,8 +32,9 @@ impl YouTubeDownload {
         println!("[Download] Starting...");
 
         // Might be a reference through a lock, if we don't drop it now we'll be holding it for ages
-        let download_path = library.path.join(format!("{}.mp3", self.id));
+        let library_path = library.path.clone();
         drop(library);
+        let download_path = library_path.join(format!("{}.%(ext)s", self.id));
         
         // Ask youtube-dl to download this video
         let output = Command::new("youtube-dl")
@@ -54,6 +57,32 @@ impl YouTubeDownload {
         }
 
         println!("[Download] Command has zero exit status");
+
+        // The download path we were working with up to this point is templated for youtube-dl with
+        // an unknown extension. Find what it actually downloaded
+        let id_as_osstring: OsString = self.id.clone().into();
+        let download_path = read_dir(&library_path)
+            .map_err(|e| DownloadError::IoError(e))?
+            .find_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+
+                if path.file_stem() == Some(&id_as_osstring) {
+                    Some(path)
+                } else {
+                    None
+                }
+            });
+
+        let download_path = if let Some(download_path) = download_path {
+            if download_path.extension().map(|s| s.to_ascii_lowercase()) == Some("mp3".into()) {
+                download_path
+            } else {
+                return Err(DownloadError::DownloadedInvalidFormat(download_path))
+            }
+        } else {
+            return Err(DownloadError::DownloadMissing)
+        };
 
         // Build up metadata
         let metadata = Self::youtube_dl_output_to_metadata(output)
