@@ -1,6 +1,6 @@
 #![feature(async_closure)]
 
-use std::{sync::{Arc, RwLock}, marker::PhantomData};
+use std::{sync::{Arc, RwLock}, marker::PhantomData, borrow::BorrowMut};
 
 use dioxus::prelude::*;
 use library::Library;
@@ -43,6 +43,48 @@ fn SongDownload<'a>(cx: Scope<'a, SongDownloadProps>) -> Element<'a> {
     })
 }
 
+#[derive(Props)]
+struct SongDownloadPanelProps<'a> {
+    library: Arc<RwLock<Library>>,
+    phantom: PhantomData<&'a ()>,
+}
+
+#[allow(non_snake_case)]
+fn SongDownloadPanel<'a>(cx: Scope<'a, SongDownloadPanelProps>) -> Element<'a> {
+    let library = cx.props.library.clone();
+
+    let id_input = use_state(&cx, || "".to_string());
+    let downloads = use_ref(&cx, || vec![]);
+
+    // Hack: Can't clone `library` in the map because it gets moved, so build a list of downloads
+    // with libraries to use here 
+    let mut downloads_plus_libraries = vec![];
+    let downloads_values = downloads.read();
+    for download in downloads_values.iter() {
+        downloads_plus_libraries.push((download, library.clone()));
+    }
+
+    cx.render(rsx!(
+        downloads_plus_libraries.iter().map(|(d, l): &(&YouTubeDownload, Arc<_>)| rsx!(
+            SongDownload {
+                library: l.clone(),
+                download: (*d).clone(),
+                phantom: PhantomData,
+            }
+        ))
+
+        input {
+            value: "{id_input}",
+            oninput: move |evt| id_input.set(evt.value.clone()),
+        }
+
+        button {
+            onclick: move |_| downloads.write().push(YouTubeDownload::new(id_input.get())),
+            "Download"
+        }
+    ))
+}
+
 #[allow(non_snake_case)]
 fn App(cx: Scope) -> Element {
     let mut library = Library::new("/Users/aaron/Music/CrossPlay".into());
@@ -66,11 +108,15 @@ fn App(cx: Scope) -> Element {
         h1 { "Downloads" }
         ul {
             // TODO: doesn't refresh when a download finishes
-            SongDownload {
+            SongDownloadPanel {
                 library: library,
-                download: YouTubeDownload::new("rVJPAZ1Hxxk"),
-                phantom: PhantomData
+                phantom: PhantomData,
             }
+            // SongDownload {
+            //     library: library,
+            //     download: YouTubeDownload::new("rVJPAZ1Hxxk"),
+            //     phantom: PhantomData
+            // }
         }
     ))
 }
