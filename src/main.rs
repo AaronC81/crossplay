@@ -1,19 +1,21 @@
 #![feature(async_closure)]
 
-use std::{sync::{Arc, RwLock}, marker::PhantomData, borrow::BorrowMut};
+use std::{sync::Arc, marker::PhantomData, borrow::BorrowMut};
 use gtk::{Orientation::{Horizontal, Vertical}, traits::{OrientableExt, ButtonExt, LabelExt, WidgetExt, EntryExt}, Inhibit, EditableSignals};
-use relm::{Widget, ContainerWidget};
+use relm::{Widget, ContainerWidget, Relm, connect_async};
 use relm_derive::{Msg, widget};
 
 use library::Library;
-use youtube::YouTubeDownload;
+use tokio::{sync::RwLock, task::JoinHandle};
+use youtube::{YouTubeDownload, DownloadError};
 use widgets::SongList;
 
 mod youtube;
 mod library;
 mod widgets;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut library = Library::new("/Users/aaron/Music/CrossPlay".into());
     library.load_songs().unwrap();
     let library = Arc::new(RwLock::new(library));
@@ -26,6 +28,7 @@ fn main() {
 pub enum TopLevelWindowMsg {
     InputDownloadId(String),
     StartDownload,
+    DownloadComplete(YouTubeDownload),
 
     Quit,
 }
@@ -33,14 +36,17 @@ pub enum TopLevelWindowMsg {
 pub struct TopLevelWindowModel {
     library: Arc<RwLock<Library>>,
 
+    ongoing_downloads: Vec<(YouTubeDownload, JoinHandle<Result<(), DownloadError>>)>,
     download_id_input: String,
 }
 
 #[widget]
 impl Widget for TopLevelWindow {
-    fn model(library: Arc<RwLock<Library>>) -> TopLevelWindowModel {
+    fn model(relm: &Relm<Self>, library: Arc<RwLock<Library>>) -> TopLevelWindowModel {
         TopLevelWindowModel {
             library,
+
+            ongoing_downloads: vec![],
             download_id_input: "".to_string(),
         }
     }
@@ -48,7 +54,22 @@ impl Widget for TopLevelWindow {
     fn update(&mut self, event: TopLevelWindowMsg) {
         match event {
             TopLevelWindowMsg::InputDownloadId(id) => self.model.download_id_input = id,
-            TopLevelWindowMsg::StartDownload => println!("Downloading {}", self.model.download_id_input.to_string()),
+            TopLevelWindowMsg::StartDownload => {
+                let dl = YouTubeDownload::new(self.model.download_id_input.clone());
+                let library = self.model.library.clone();
+
+                self.model.ongoing_downloads.push(
+                    (
+                        dl.clone(),
+                        tokio::spawn(async move {
+                            dl.download(library.read().await).await
+                        }),
+                    )
+                );
+            }
+            TopLevelWindowMsg::DownloadComplete(d) => {
+                println!("Download complete! {:?}", d)
+            }
 
             TopLevelWindowMsg::Quit => gtk::main_quit(),
         }

@@ -1,8 +1,9 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use gtk::{traits::{OrientableExt, LabelExt}, Orientation::Vertical};
 use relm::{Widget, Component, ContainerWidget, Update};
 use relm_derive::{widget, Msg};
+use tokio::{sync::RwLock, runtime::Handle};
 
 use crate::library::{Library, Song, self};
 
@@ -38,11 +39,14 @@ impl Widget for SongList {
                 }
 
                 // Build new song list
-                let library = self.model.library.read().unwrap();
-                for song in library.songs().cloned() {
-                    let entry = self.widgets.song_list.add_widget::<SongEntry>(song);
-                    self.model.entries.push(entry);
-                }
+                // (Because of the RwLock, this involves poking tokio a bit)
+                tokio::task::block_in_place(|| {
+                    let library = self.model.library.blocking_read();
+                    for song in library.songs().cloned() {
+                        let entry = self.widgets.song_list.add_widget::<SongEntry>(song);
+                        self.model.entries.push(entry);
+                    }
+                });
             }
         }
     }
