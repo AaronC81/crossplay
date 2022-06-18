@@ -120,9 +120,9 @@ impl Application for MainView {
             .push(
                 Text::new(format!("{} download(s) in progress", self.downloads_in_progress.len()))
             )
-            .push(
-                Text::new(format!("{} download(s) have errored", self.download_errors.len()))
-            )
+            .push(Column::with_children(self.download_errors.iter().map(|(dl, err)| {
+                Text::new(format!("Download {} failed: {:?}", dl.id, err)).color([1.0, 0.0, 0.0]).into()
+            }).collect()))
             .push(self.song_list_view.view())
             .into()
     }
