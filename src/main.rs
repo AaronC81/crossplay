@@ -1,7 +1,7 @@
 #![feature(async_closure)]
 #![feature(iter_intersperse)]
 
-use std::{sync::Arc, future::ready, path::PathBuf, io::BufReader, fs::File};
+use std::{sync::{Arc, Mutex}, future::ready, path::PathBuf, io::BufReader, fs::File};
 
 use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
 use library::{Library, Song};
@@ -268,7 +268,8 @@ impl From<SongListMessage> for Message {
 struct SongListView {
     library: Arc<RwLock<Library>>,
     refresh_button: button::State,
-    song_views: Vec<SongView>,
+    song_views: Vec<(Song, SongView)>,
+    currently_playing_song: Arc<RwLock<Option<(Song, Sink)>>>,
 }
 
 impl SongListView {
@@ -277,17 +278,21 @@ impl SongListView {
             library,
             refresh_button: button::State::new(),
             song_views: vec![],
+            currently_playing_song: Arc::new(RwLock::new(None)),
         };
         result.rebuild_song_views();
         result
     }
 
     pub fn view(&mut self) -> Element<Message> {
+        let currently_playing_song = self.currently_playing_song.blocking_read();
+        let currently_playing_song = currently_playing_song.as_ref().map(|x| &x.0);
+
         Column::new()
             .push(Column::with_children(
-                self.song_views.iter_mut().map(|x| Some(x)).intersperse_with(|| None).map(|v|
-                    if let Some(v) = v {
-                        v.view().into()
+                self.song_views.iter_mut().map(|x| Some(x)).intersperse_with(|| None).map(|view|
+                    if let Some((song, view)) = view {
+                        view.view(Some(&*song) == currently_playing_song).into()
                     } else {
                         Rule::horizontal(10).into()
                     }
@@ -303,14 +308,22 @@ impl SongListView {
     pub fn update(&mut self, message: SongListMessage) -> Command<Message> {
         match message {
             SongListMessage::PlaySong(song) => {
+                let currently_playing_song = self.currently_playing_song.clone();
                 return Command::perform((async move || {
+                    // Note: If changing this code, it's important that `OutputStream` doesn't get
+                    // dropped while `Sink` is alive, otherwise the sink will stop working. This
+                    // isn't enforced by lifetimes or anything :(
                     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
                     let sink = Sink::try_new(&stream_handle).unwrap();
-                    let file = BufReader::new(File::open(song.path).unwrap());
+                    let file = BufReader::new(File::open(song.path.clone()).unwrap());
                     let source = Decoder::new(file).unwrap();
                     sink.set_volume(0.1);
                     sink.append(source);
-                    sink.sleep_until_end();
+
+                    {
+                        *currently_playing_song.blocking_write() = Some((song, sink));
+                    }
+                    currently_playing_song.blocking_read().as_ref().unwrap().1.sleep_until_end();
                 })(), |_| Message::None);
             }
         }
@@ -325,7 +338,7 @@ impl SongListView {
         let songs = library.songs();
 
         for song in songs {
-            self.song_views.push(SongView::new(self.library.clone(), song.clone()))
+            self.song_views.push((song.clone(), SongView::new(self.library.clone(), song.clone())))
         }
     }
 }
@@ -345,11 +358,11 @@ impl SongView {
         }
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&mut self, playing: bool) -> Element<Message> {
         Column::new()
             .push(Text::new(self.song.metadata.title.clone()))
             .push(
-                Button::new(&mut self.play_button_state, Text::new("Play"))
+                Button::new(&mut self.play_button_state, Text::new(if playing { "Playing" } else { "Play" }))
                     .on_press(SongListMessage::PlaySong(self.song.clone()).into())
             )
             .padding(10)
