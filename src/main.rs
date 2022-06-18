@@ -1,10 +1,10 @@
 #![feature(async_closure)]
 
-use std::{sync::Arc, marker::PhantomData, borrow::BorrowMut};
+use std::{sync::Arc, future::ready};
 
 use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
 use library::Library;
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::{sync::RwLock};
 use ui_util::ElementContainerExtensions;
 use youtube::{YouTubeDownload, DownloadError};
 
@@ -19,25 +19,14 @@ fn main() {
 #[derive(Debug, Clone)]
 enum Message {
     ReloadSongList,
-    DownloadIdInputChange(String),
-    StartDownload,
-    DownloadComplete(YouTubeDownload, Result<(), DownloadError>),
-    ToggleDownloadStatus,
+    DownloadMessage(DownloadMessage),
 }
 
 struct MainView {
     library: Arc<RwLock<Library>>,
     
     song_list_view: SongListView,
-
-    download_id_state: text_input::State,
-    download_id_input: String,
-    download_status_showing: bool,
-    download_status_button_state: button::State,
-    download_button_state: button::State,
-    downloads_in_progress: Vec<YouTubeDownload>,
-    download_errors: Vec<(YouTubeDownload, DownloadError)>,
-    any_download_occurred: bool,
+    download_view: DownloadView,
 }
 
 impl Application for MainView {
@@ -55,15 +44,7 @@ impl Application for MainView {
                 library: library.clone(),
 
                 song_list_view: SongListView::new(library.clone()),
-
-                download_id_state: text_input::State::new(),
-                download_id_input: "".to_string(),
-                download_status_showing: false,
-                download_status_button_state: button::State::new(),
-                download_button_state: button::State::new(),
-                downloads_in_progress: vec![],
-                download_errors: vec![],
-                any_download_occurred: false,
+                download_view: DownloadView::new(library.clone()),
             },
             Command::none()
         )
@@ -76,44 +57,63 @@ impl Application for MainView {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> { 
         match message {
             Message::ReloadSongList => self.library.blocking_write().load_songs().unwrap(),
-            Message::DownloadIdInputChange(s) => self.download_id_input = s,
-
-            Message::StartDownload => {
-                self.any_download_occurred = true;
-
-                // Need two named copies for the two closures
-                let async_dl = YouTubeDownload::new(self.download_id_input.clone());
-                let result_dl = async_dl.clone();
-                self.downloads_in_progress.push(result_dl.clone());
-                
-                let library = self.library.clone();
-                return Command::perform(
-                    (async move || {
-                        let library = library.read().await;
-                        async_dl.download(library).await
-                    })(),
-                    move |r| Message::DownloadComplete(result_dl.clone(), r)
-                )
-            },
-
-            Message::DownloadComplete(dl, result) => {
-                // Remove the download which just finished
-                self.downloads_in_progress.retain(|this_dl| *this_dl != dl);
-
-                if let Err(e) = result {
-                    self.download_errors.push((dl, e));
-                }
-
-                self.update(Message::ReloadSongList);
-            },
-
-            Message::ToggleDownloadStatus => self.download_status_showing = !self.download_status_showing,
+            Message::DownloadMessage(dm) => return self.download_view.update(dm),
         }
 
         Command::none()
     }
 
     fn view(&mut self) -> Element<'_, Self::Message> {
+        Column::new()
+            .push(self.download_view.view())
+            .push(self.song_list_view.view())
+            .into()
+    }
+}
+
+#[derive(Debug, Clone)]
+enum DownloadMessage {
+    IdInputChange(String),
+    StartDownload,
+    DownloadComplete(YouTubeDownload, Result<(), DownloadError>),
+    ToggleStatus,
+}
+
+impl From<DownloadMessage> for Message {
+    fn from(dm: DownloadMessage) -> Self { Message::DownloadMessage(dm) }
+}
+
+struct DownloadView {
+    library: Arc<RwLock<Library>>,
+
+    id_state: text_input::State,
+    id_input: String,
+
+    status_showing: bool,
+    status_button_state: button::State,
+
+    download_button_state: button::State,
+    downloads_in_progress: Vec<YouTubeDownload>,
+    download_errors: Vec<(YouTubeDownload, DownloadError)>,
+    any_download_occurred: bool,
+}
+
+impl DownloadView {
+    pub fn new(library: Arc<RwLock<Library>>) -> Self {
+        Self {
+            library,
+            id_state: text_input::State::new(),
+            id_input: "".to_string(),
+            status_showing: false,
+            status_button_state: button::State::new(),
+            download_button_state: button::State::new(),
+            downloads_in_progress: vec![],
+            download_errors: vec![],
+            any_download_occurred: false,
+        }
+    }
+
+    pub fn view(&mut self) -> Element<Message> {
         Column::new()
             .push(
                 Container::new(
@@ -123,10 +123,10 @@ impl Application for MainView {
                         .height(Length::Units(60))
                         .push(
                             TextInput::new(
-                                &mut self.download_id_state, 
+                                &mut self.id_state, 
                                 "Paste a YouTube video ID...", 
-                                &self.download_id_input, 
-                                |s| Message::DownloadIdInputChange(s),
+                                &self.id_input, 
+                                |s| DownloadMessage::IdInputChange(s).into(),
                             )
                             .padding(5)
                         )
@@ -137,12 +137,12 @@ impl Application for MainView {
                                     .vertical_alignment(Vertical::Center)
                                     .height(Length::Fill)
                             )
-                            .on_press(Message::StartDownload)
+                            .on_press(DownloadMessage::StartDownload.into())
                             .height(Length::Fill)
                         )
                         .push(
                             Button::new(
-                                &mut self.download_status_button_state,
+                                &mut self.status_button_state,
                                 Row::new()
                                     .height(Length::Fill)
                                     .push(
@@ -166,7 +166,7 @@ impl Application for MainView {
                                     )
                                     .spacing(10)
                             )
-                            .on_press(Message::ToggleDownloadStatus)
+                            .on_press(DownloadMessage::ToggleStatus.into())
                             .height(Length::Fill)
                         )
                 )
@@ -175,7 +175,7 @@ impl Application for MainView {
                     ..Default::default()
                 }))
             )
-            .push_if(self.download_status_showing, ||
+            .push_if(self.status_showing, ||
                 Container::new(
                     Column::new()
                         .push(
@@ -204,8 +204,46 @@ impl Application for MainView {
                     ..Default::default()
                 }))
             )
-            .push(self.song_list_view.view())
             .into()
+    }
+
+    pub fn update(&mut self, message: DownloadMessage) -> Command<Message> { 
+        match message {
+            DownloadMessage::IdInputChange(s) => self.id_input = s,
+
+            DownloadMessage::StartDownload => {
+                self.any_download_occurred = true;
+
+                // Need two named copies for the two closures
+                let async_dl = YouTubeDownload::new(self.id_input.clone());
+                let result_dl = async_dl.clone();
+                self.downloads_in_progress.push(result_dl.clone());
+                
+                let library = self.library.clone();
+                return Command::perform(
+                    (async move || {
+                        let library = library.read().await;
+                        async_dl.download(library).await
+                    })(),
+                    move |r| DownloadMessage::DownloadComplete(result_dl.clone(), r).into()
+                )
+            },
+
+            DownloadMessage::DownloadComplete(dl, result) => {
+                // Remove the download which just finished
+                self.downloads_in_progress.retain(|this_dl| *this_dl != dl);
+
+                if let Err(e) = result {
+                    self.download_errors.push((dl, e));
+                }
+
+                return Command::perform(ready(()), |_| Message::ReloadSongList)
+            },
+
+            DownloadMessage::ToggleStatus => self.status_showing = !self.status_showing,
+        }
+
+        Command::none()
     }
 }
 
