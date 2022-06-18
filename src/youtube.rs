@@ -1,4 +1,4 @@
-use std::{sync::RwLockReadGuard, ops::Deref, fs::read_dir, ffi::OsString, path::PathBuf};
+use std::{sync::{RwLockReadGuard, Arc}, ops::Deref, fs::read_dir, ffi::OsString, path::PathBuf};
 
 use async_process::{Command, Output};
 use serde_json::Value;
@@ -10,9 +10,9 @@ pub struct YouTubeDownload {
     pub id: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DownloadError {
-    IoError(std::io::Error),
+    IoError(Arc<std::io::Error>),
     YouTubeDLNonZeroExit(Output),
     DownloadMissing,
     DownloadedInvalidFormat(PathBuf),
@@ -47,7 +47,7 @@ impl YouTubeDownload {
             .arg(self.url())
             .output()
             .await
-            .map_err(|e| DownloadError::IoError(e))?;
+            .map_err(|e| DownloadError::IoError(Arc::new(e)))?;
 
         println!("[Download] Command complete");
 
@@ -62,7 +62,7 @@ impl YouTubeDownload {
         // an unknown extension. Find what it actually downloaded
         let id_as_osstring: OsString = self.id.clone().into();
         let download_path = read_dir(&library_path)
-            .map_err(|e| DownloadError::IoError(e))?
+            .map_err(|e| DownloadError::IoError(Arc::new(e)))?
             .find_map(|entry| {
                 let entry = entry.ok()?;
                 let path = entry.path();

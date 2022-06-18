@@ -1,4 +1,4 @@
-use std::{path::{PathBuf, Path}, fs::read_dir};
+use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc};
 
 use id3::{Tag, TagLike, frame::Comment};
 
@@ -8,10 +8,10 @@ pub struct Library {
     loaded_songs: Vec<Song>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LibraryError {
-    IoError(std::io::Error),
-    TagError(id3::Error),
+    IoError(Arc<std::io::Error>),
+    TagError(Arc<id3::Error>),
 }
 
 impl Library {
@@ -26,10 +26,10 @@ impl Library {
     pub fn load_songs(&mut self) -> Result<(), LibraryError> {
         // Look for MP3 files at the root of the directory
         self.loaded_songs.clear();
-        let entries = read_dir(&self.path).map_err(|e| LibraryError::IoError(e))?;
+        let entries = read_dir(&self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| LibraryError::IoError(e))?;
+            let entry = entry.map_err(|e| LibraryError::IoError(Arc::new(e)))?;
             let path = entry.path();
 
             if path.extension().map(|s| s.to_ascii_lowercase()) == Some("mp3".into()) {
@@ -106,7 +106,7 @@ impl SongMetadata {
     pub(crate) fn write_into_file(&self, file: &Path) -> Result<(), LibraryError> {
         let mut tag = Tag::new();
         self.write_into_tag(&mut tag);
-        Tag::write_to_path(&tag, file, id3::Version::Id3v23).map_err(|e| LibraryError::TagError(e))?;
+        Tag::write_to_path(&tag, file, id3::Version::Id3v23).map_err(|e| LibraryError::TagError(Arc::new(e)))?;
         Ok(())
     }
 }

@@ -19,6 +19,7 @@ enum Message {
     ReloadSongList,
     DownloadIdInputChange(String),
     StartDownload,
+    DownloadComplete(YouTubeDownload, Result<(), DownloadError>)
 }
 
 struct MainView {
@@ -28,8 +29,9 @@ struct MainView {
 
     download_id_state: text_input::State,
     download_id_input: String,
-
     download_button_state: button::State,
+    downloads_in_progress: Vec<YouTubeDownload>,
+    download_errors: Vec<(YouTubeDownload, DownloadError)>,
 }
 
 impl Application for MainView {
@@ -50,8 +52,9 @@ impl Application for MainView {
 
                 download_id_state: text_input::State::new(),
                 download_id_input: "".to_string(),
-
                 download_button_state: button::State::new(),
+                downloads_in_progress: vec![],
+                download_errors: vec![],
             },
             Command::none()
         )
@@ -65,16 +68,32 @@ impl Application for MainView {
         match message {
             Message::ReloadSongList => self.library.blocking_write().load_songs().unwrap(),
             Message::DownloadIdInputChange(s) => self.download_id_input = s,
+
             Message::StartDownload => {
-                let dl = YouTubeDownload::new(self.download_id_input.clone());
+                // Need two named copies for the two closures
+                let async_dl = YouTubeDownload::new(self.download_id_input.clone());
+                let result_dl = async_dl.clone();
+                self.downloads_in_progress.push(result_dl.clone());
+                
                 let library = self.library.clone();
                 return Command::perform(
                     (async move || {
                         let library = library.read().await;
-                        dl.download(library).await.unwrap();
+                        async_dl.download(library).await
                     })(),
-                    |_| Message::ReloadSongList
+                    move |r| Message::DownloadComplete(result_dl.clone(), r)
                 )
+            },
+
+            Message::DownloadComplete(dl, result) => {
+                // Remove the download which just finished
+                self.downloads_in_progress.retain(|this_dl| *this_dl != dl);
+
+                if let Err(e) = result {
+                    self.download_errors.push((dl, e));
+                }
+
+                self.update(Message::ReloadSongList);
             }
         }
 
@@ -97,6 +116,12 @@ impl Application for MainView {
                     Text::new("Download")
                 )
                 .on_press(Message::StartDownload)
+            )
+            .push(
+                Text::new(format!("{} download(s) in progress", self.downloads_in_progress.len()))
+            )
+            .push(
+                Text::new(format!("{} download(s) have errored", self.download_errors.len()))
             )
             .push(self.song_list_view.view())
             .into()
