@@ -1,9 +1,11 @@
 #![feature(async_closure)]
+#![feature(iter_intersperse)]
 
-use std::{sync::Arc, future::ready};
+use std::{sync::Arc, future::ready, path::PathBuf, io::BufReader, fs::File};
 
 use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
-use library::Library;
+use library::{Library, Song};
+use rodio::{OutputStream, Decoder, Source, Sink};
 use tokio::{sync::RwLock};
 use ui_util::ElementContainerExtensions;
 use youtube::{YouTubeDownload, DownloadError};
@@ -18,8 +20,10 @@ fn main() {
 
 #[derive(Debug, Clone)]
 enum Message {
+    None,
     ReloadSongList,
     DownloadMessage(DownloadMessage),
+    SongListMessage(SongListMessage),
 }
 
 struct MainView {
@@ -56,7 +60,12 @@ impl Application for MainView {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> { 
         match message {
-            Message::ReloadSongList => self.library.blocking_write().load_songs().unwrap(),
+            Message::None => (),
+            Message::ReloadSongList => {
+                self.library.blocking_write().load_songs().unwrap();
+                self.song_list_view.rebuild_song_views();
+            },
+            Message::SongListMessage(slm) => return self.song_list_view.update(slm),
             Message::DownloadMessage(dm) => return self.download_view.update(dm),
         }
 
@@ -247,32 +256,104 @@ impl DownloadView {
     }
 }
 
+#[derive(Debug, Clone)]
+enum SongListMessage {
+    PlaySong(Song),
+}
+
+impl From<SongListMessage> for Message {
+    fn from(slm: SongListMessage) -> Self { Message::SongListMessage(slm) }
+}
+
 struct SongListView {
     library: Arc<RwLock<Library>>,
     refresh_button: button::State,
+    song_views: Vec<SongView>,
 }
 
 impl SongListView {
     pub fn new(library: Arc<RwLock<Library>>) -> Self {
-        Self {
+        let mut result = Self {
             library,
             refresh_button: button::State::new(),
+            song_views: vec![],
+        };
+        result.rebuild_song_views();
+        result
+    }
+
+    pub fn view(&mut self) -> Element<Message> {
+        Column::new()
+            .push(Column::with_children(
+                self.song_views.iter_mut().map(|x| Some(x)).intersperse_with(|| None).map(|v|
+                    if let Some(v) = v {
+                        v.view().into()
+                    } else {
+                        Rule::horizontal(10).into()
+                    }
+                ).collect()
+            ))
+            .push(
+                Button::new(&mut self.refresh_button, Text::new("Reload song list"))
+                    .on_press(Message::ReloadSongList)
+            )
+            .into()
+    }
+
+    pub fn update(&mut self, message: SongListMessage) -> Command<Message> {
+        match message {
+            SongListMessage::PlaySong(song) => {
+                return Command::perform((async move || {
+                    let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+                    let sink = Sink::try_new(&stream_handle).unwrap();
+                    let file = BufReader::new(File::open(song.path).unwrap());
+                    let source = Decoder::new(file).unwrap();
+                    sink.set_volume(0.1);
+                    sink.append(source);
+                    sink.sleep_until_end();
+                })(), |_| Message::None);
+            }
+        }
+
+        Command::none()
+    }
+
+    pub fn rebuild_song_views(&mut self) {
+        self.song_views.clear();
+
+        let library = self.library.blocking_read();
+        let songs = library.songs();
+
+        for song in songs {
+            self.song_views.push(SongView::new(self.library.clone(), song.clone()))
+        }
+    }
+}
+
+struct SongView {
+    library: Arc<RwLock<Library>>,
+    song: Song,
+    play_button_state: button::State,
+}
+
+impl SongView {
+    pub fn new(library: Arc<RwLock<Library>>, song: Song) -> Self {
+        Self {
+            library,
+            song,
+            play_button_state: button::State::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<Message> {
-        let mut column = Column::new();
-
-        for song in self.library.blocking_read().songs() {
-            column = column.push(Text::new(song.metadata.title.clone()));
-        }
-
-        column = column.push(
-            Button::new(&mut self.refresh_button, Text::new("Reload song list"))
-                .on_press(Message::ReloadSongList)
-        );
-
-        column.into()
+        Column::new()
+            .push(Text::new(self.song.metadata.title.clone()))
+            .push(
+                Button::new(&mut self.play_button_state, Text::new("Play"))
+                    .on_press(SongListMessage::PlaySong(self.song.clone()).into())
+            )
+            .padding(10)
+            .into()
     }
 }
 
