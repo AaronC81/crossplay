@@ -1,11 +1,11 @@
 #![feature(async_closure)]
 #![feature(iter_intersperse)]
 
-use std::{sync::{Arc, RwLock}, future::ready, path::PathBuf, io::BufReader, fs::File};
+use std::{sync::{Arc, RwLock, Mutex}, future::ready, path::PathBuf, io::BufReader, fs::File};
 
 use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
 use library::{Library, Song};
-use rodio::{OutputStream, Decoder, Source, Sink};
+use rodio::{OutputStream, Decoder, Source, Sink, OutputStreamHandle};
 use ui_util::ElementContainerExtensions;
 use youtube::{YouTubeDownload, DownloadError};
 
@@ -13,7 +13,15 @@ mod youtube;
 mod library;
 mod ui_util;
 
+static mut OUTPUT_STREAM: Option<OutputStream> = None;
+static mut OUTPUT_STREAM_HANDLE: Option<OutputStreamHandle> = None;
+
 fn main() {
+    unsafe {
+        let (stream, stream_handle) = OutputStream::try_default().unwrap();
+        OUTPUT_STREAM = Some(stream);
+        OUTPUT_STREAM_HANDLE = Some(stream_handle);
+    }
     MainView::run(Settings::with_flags(())).unwrap();
 }
 
@@ -257,6 +265,7 @@ impl DownloadView {
 #[derive(Debug, Clone)]
 enum SongListMessage {
     PlaySong(Song),
+    PlaySongWorker,
     StopSong,
 }
 
@@ -309,47 +318,41 @@ impl SongListView {
             SongListMessage::PlaySong(song) => {
                 let currently_playing_song = self.currently_playing_song.clone();
 
-                // TODO: This (broken) case is currently possible because the UI doesn't update as
-                // quickly as it should, but it would probably cause a deadlock because the other
-                // thread will be holding a reader to play the sink, so our writer will block
-                // forever.
                 if currently_playing_song.read().unwrap().is_some() {
                     return Command::none();
                 }
 
                 return Command::perform((async move || {
-                    // Note: If changing this code, it's important that `OutputStream` doesn't get
-                    // dropped while `Sink` is alive, otherwise the sink will stop working. This
-                    // isn't enforced by lifetimes or anything :(
-                    let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-                    let sink = Sink::try_new(&stream_handle).unwrap();
+                    // Safety: The `if` above would've bailed if something else is playing audio, so
+                    // we're definitely the only thread doing so.
+                    let stream_handle = unsafe { OUTPUT_STREAM_HANDLE.as_ref().unwrap() };
+
+                    let sink = Sink::try_new(stream_handle).unwrap();
                     let file = BufReader::new(File::open(song.path.clone()).unwrap());
                     let source = Decoder::new(file).unwrap();
                     sink.set_volume(0.1);
                     sink.append(source);
 
-                    let mut writer = currently_playing_song.write().unwrap();
-                    *writer = Some((song, sink));
-                    drop(writer);
+                    *currently_playing_song.write().unwrap() = Some((song, sink));
+                })(), |_| SongListMessage::PlaySongWorker.into());
+            },
 
-                    let reader = currently_playing_song.read().unwrap();
-                    reader.as_ref().unwrap().1.sleep_until_end();
+            SongListMessage::PlaySongWorker => {
+                let currently_playing_song = self.currently_playing_song.clone();
+
+                return Command::perform((async move || {
+                    currently_playing_song.read().unwrap().as_ref().unwrap().1.sleep_until_end();
                 })(), |_| Message::None);
             },
 
             SongListMessage::StopSong => {
-                println!("Stop song");
-                println!("{}", if let Ok(_) = self.currently_playing_song.try_read() { "read!"} else { "no read" });
                 let currently_playing_song = self.currently_playing_song.read().unwrap();
-                println!("Got read handle");
                 if let Some((_, sink)) = &*currently_playing_song {
                     sink.stop();
                 }
                 drop(currently_playing_song);
 
-                println!("Stopped sink, waiting for write...");
                 let mut currently_playing_song = self.currently_playing_song.write().unwrap();
-                println!("Write grabbed");
                 *currently_playing_song = None;
             },
         }
@@ -388,7 +391,7 @@ impl SongView {
         Column::new()
             .push(Text::new(self.song.metadata.title.clone()))
             .push(
-                Button::new(&mut self.play_button_state, Text::new(if playing { "Playing" } else { "Play" }))
+                Button::new(&mut self.play_button_state, Text::new(if playing { "Stop" } else { "Play" }))
                     .on_press(
                         if playing {
                             SongListMessage::StopSong.into()
