@@ -1,4 +1,4 @@
-use std::{sync::Arc, ops::Deref, io::Cursor};
+use std::{sync::Arc, ops::Deref, io::Cursor, path::{PathBuf, Path}};
 
 use async_process::{Command, Output};
 use id3::frame::Picture;
@@ -31,12 +31,9 @@ impl YouTubeDownload {
         format!("https://youtube.com/watch?v={}", self.id)
     }
 
-    pub async fn download(&self, library: impl Deref<Target = Library>) -> Result<(), DownloadError> {
+    pub async fn download(&self, library_path: &Path) -> Result<(), DownloadError> {
         println!("[Download] Starting...");
 
-        // Might be a reference through a lock, if we don't drop it now we'll be holding it for ages
-        let library_path = library.path.clone();
-        drop(library);
         let download_path = library_path.join(format!("{}.%(ext)s", self.id));
         
         // Ask youtube-dl to download this video

@@ -1,12 +1,11 @@
 #![feature(async_closure)]
 #![feature(iter_intersperse)]
 
-use std::{sync::{Arc, Mutex}, future::ready, path::PathBuf, io::BufReader, fs::File};
+use std::{sync::{Arc, RwLock}, future::ready, path::PathBuf, io::BufReader, fs::File};
 
 use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
 use library::{Library, Song};
 use rodio::{OutputStream, Decoder, Source, Sink};
-use tokio::{sync::RwLock};
 use ui_util::ElementContainerExtensions;
 use youtube::{YouTubeDownload, DownloadError};
 
@@ -62,7 +61,7 @@ impl Application for MainView {
         match message {
             Message::None => (),
             Message::ReloadSongList => {
-                self.library.blocking_write().load_songs().unwrap();
+                self.library.write().unwrap().load_songs().unwrap();
                 self.song_list_view.rebuild_song_views();
             },
             Message::SongListMessage(slm) => return self.song_list_view.update(slm),
@@ -228,11 +227,10 @@ impl DownloadView {
                 let result_dl = async_dl.clone();
                 self.downloads_in_progress.push(result_dl.clone());
                 
-                let library = self.library.clone();
+                let library_path = self.library.read().unwrap().path.clone();
                 return Command::perform(
                     (async move || {
-                        let library = library.read().await;
-                        async_dl.download(library).await
+                        async_dl.download(&library_path).await
                     })(),
                     move |r| DownloadMessage::DownloadComplete(result_dl.clone(), r).into()
                 )
@@ -259,6 +257,7 @@ impl DownloadView {
 #[derive(Debug, Clone)]
 enum SongListMessage {
     PlaySong(Song),
+    StopSong,
 }
 
 impl From<SongListMessage> for Message {
@@ -285,7 +284,7 @@ impl SongListView {
     }
 
     pub fn view(&mut self) -> Element<Message> {
-        let currently_playing_song = self.currently_playing_song.blocking_read();
+        let currently_playing_song = self.currently_playing_song.read().unwrap();
         let currently_playing_song = currently_playing_song.as_ref().map(|x| &x.0);
 
         Column::new()
@@ -309,6 +308,15 @@ impl SongListView {
         match message {
             SongListMessage::PlaySong(song) => {
                 let currently_playing_song = self.currently_playing_song.clone();
+
+                // TODO: This (broken) case is currently possible because the UI doesn't update as
+                // quickly as it should, but it would probably cause a deadlock because the other
+                // thread will be holding a reader to play the sink, so our writer will block
+                // forever.
+                if currently_playing_song.read().unwrap().is_some() {
+                    return Command::none();
+                }
+
                 return Command::perform((async move || {
                     // Note: If changing this code, it's important that `OutputStream` doesn't get
                     // dropped while `Sink` is alive, otherwise the sink will stop working. This
@@ -320,12 +328,30 @@ impl SongListView {
                     sink.set_volume(0.1);
                     sink.append(source);
 
-                    {
-                        *currently_playing_song.blocking_write() = Some((song, sink));
-                    }
-                    currently_playing_song.blocking_read().as_ref().unwrap().1.sleep_until_end();
+                    let mut writer = currently_playing_song.write().unwrap();
+                    *writer = Some((song, sink));
+                    drop(writer);
+
+                    let reader = currently_playing_song.read().unwrap();
+                    reader.as_ref().unwrap().1.sleep_until_end();
                 })(), |_| Message::None);
-            }
+            },
+
+            SongListMessage::StopSong => {
+                println!("Stop song");
+                println!("{}", if let Ok(_) = self.currently_playing_song.try_read() { "read!"} else { "no read" });
+                let currently_playing_song = self.currently_playing_song.read().unwrap();
+                println!("Got read handle");
+                if let Some((_, sink)) = &*currently_playing_song {
+                    sink.stop();
+                }
+                drop(currently_playing_song);
+
+                println!("Stopped sink, waiting for write...");
+                let mut currently_playing_song = self.currently_playing_song.write().unwrap();
+                println!("Write grabbed");
+                *currently_playing_song = None;
+            },
         }
 
         Command::none()
@@ -334,7 +360,7 @@ impl SongListView {
     pub fn rebuild_song_views(&mut self) {
         self.song_views.clear();
 
-        let library = self.library.blocking_read();
+        let library = self.library.read().unwrap();
         let songs = library.songs();
 
         for song in songs {
@@ -363,7 +389,13 @@ impl SongView {
             .push(Text::new(self.song.metadata.title.clone()))
             .push(
                 Button::new(&mut self.play_button_state, Text::new(if playing { "Playing" } else { "Play" }))
-                    .on_press(SongListMessage::PlaySong(self.song.clone()).into())
+                    .on_press(
+                        if playing {
+                            SongListMessage::StopSong.into()
+                        } else {
+                            SongListMessage::PlaySong(self.song.clone()).into()
+                        }
+                    )
             )
             .padding(10)
             .into()
