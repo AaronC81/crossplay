@@ -1,105 +1,132 @@
 #![feature(async_closure)]
 
 use std::{sync::Arc, marker::PhantomData, borrow::BorrowMut};
-use gtk::{Orientation::{Horizontal, Vertical}, traits::{OrientableExt, ButtonExt, LabelExt, WidgetExt, EntryExt}, Inhibit, EditableSignals};
-use relm::{Widget, ContainerWidget, Relm, connect_async};
-use relm_derive::{Msg, widget};
 
+use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input};
 use library::Library;
 use tokio::{sync::RwLock, task::JoinHandle};
 use youtube::{YouTubeDownload, DownloadError};
-use widgets::SongList;
 
 mod youtube;
 mod library;
-mod widgets;
 
-#[tokio::main]
-async fn main() {
-    let mut library = Library::new("/Users/aaron/Music/CrossPlay".into());
-    library.load_songs().unwrap();
-    let library = Arc::new(RwLock::new(library));
-
-    TopLevelWindow::run(library).unwrap();
+fn main() {
+    MainView::run(Settings::with_flags(())).unwrap();
 }
 
-
-#[derive(Msg)]
-pub enum TopLevelWindowMsg {
-    InputDownloadId(String),
+#[derive(Debug, Clone)]
+enum Message {
+    ReloadSongList,
+    DownloadIdInputChange(String),
     StartDownload,
-    DownloadComplete(YouTubeDownload),
-
-    Quit,
 }
 
-pub struct TopLevelWindowModel {
+struct MainView {
     library: Arc<RwLock<Library>>,
+    
+    song_list_view: SongListView,
 
-    ongoing_downloads: Vec<(YouTubeDownload, JoinHandle<Result<(), DownloadError>>)>,
+    download_id_state: text_input::State,
     download_id_input: String,
+
+    download_button_state: button::State,
 }
 
-#[widget]
-impl Widget for TopLevelWindow {
-    fn model(relm: &Relm<Self>, library: Arc<RwLock<Library>>) -> TopLevelWindowModel {
-        TopLevelWindowModel {
-            library,
+impl Application for MainView {
+    type Message = Message;
+    type Executor = executor::Default;
+    type Flags = ();
 
-            ongoing_downloads: vec![],
-            download_id_input: "".to_string(),
-        }
-    }
+    fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
+        let mut library = Library::new("/Users/aaron/Music/CrossPlay".into());
+        library.load_songs().unwrap();
+        let library = Arc::new(RwLock::new(library));
+    
+        (
+            MainView {
+                library: library.clone(),
 
-    fn update(&mut self, event: TopLevelWindowMsg) {
-        match event {
-            TopLevelWindowMsg::InputDownloadId(id) => self.model.download_id_input = id,
-            TopLevelWindowMsg::StartDownload => {
-                let dl = YouTubeDownload::new(self.model.download_id_input.clone());
-                let library = self.model.library.clone();
+                song_list_view: SongListView::new(library.clone()),
 
-                self.model.ongoing_downloads.push(
-                    (
-                        dl.clone(),
-                        tokio::spawn(async move {
-                            dl.download(library.read().await).await
-                        }),
-                    )
-                );
-            }
-            TopLevelWindowMsg::DownloadComplete(d) => {
-                println!("Download complete! {:?}", d)
-            }
+                download_id_state: text_input::State::new(),
+                download_id_input: "".to_string(),
 
-            TopLevelWindowMsg::Quit => gtk::main_quit(),
-        }
-    }
-
-    view! {
-        gtk::Window {
-            gtk::Box {
-                orientation: Vertical,
-
-                // Download panel
-                gtk::Box {
-                    orientation: Horizontal,
-                    gtk::Entry {
-                        changed(entry) => TopLevelWindowMsg::InputDownloadId(entry.text().to_string()),
-                        text: &self.model.download_id_input,
-                    },
-                    gtk::Button {
-                        clicked => TopLevelWindowMsg::StartDownload,
-                        label: "Download",
-                    },
-                },
-                
-                SongList(self.model.library.clone()),
+                download_button_state: button::State::new(),
             },
+            Command::none()
+        )
+    }
 
-            // Use a tuple when you want to both send a message and return a value to
-            // the GTK+ callback.
-            delete_event(_, _) => (TopLevelWindowMsg::Quit, Inhibit(false)),
+    fn title(&self) -> String {
+        "CrossPlay".to_string()
+    }
+
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> { 
+        match message {
+            Message::ReloadSongList => self.library.blocking_write().load_songs().unwrap(),
+            Message::DownloadIdInputChange(s) => self.download_id_input = s,
+            Message::StartDownload => {
+                let dl = YouTubeDownload::new(self.download_id_input.clone());
+                return Command::perform(
+                    (async move |l: Arc<RwLock<Library>>| {
+                        let library = l.read().await;
+                        dl.download(library).await.unwrap();
+                    })(self.library.clone()),
+                    |_| Message::ReloadSongList
+                )
+            }
         }
+
+        Command::none()
+    }
+
+    fn view(&mut self) -> Element<'_, Self::Message> {
+        Column::new()
+            .push(
+                TextInput::new(
+                    &mut self.download_id_state, 
+                    "", 
+                    &self.download_id_input, 
+                    |s| Message::DownloadIdInputChange(s),
+                )
+            )
+            .push(
+                Button::new(
+                    &mut self.download_button_state,
+                    Text::new("Download")
+                )
+                .on_press(Message::StartDownload)
+            )
+            .push(self.song_list_view.view())
+            .into()
     }
 }
 
+struct SongListView {
+    library: Arc<RwLock<Library>>,
+    refresh_button: button::State,
+}
+
+impl SongListView {
+    pub fn new(library: Arc<RwLock<Library>>) -> Self {
+        Self {
+            library,
+            refresh_button: button::State::new(),
+        }
+    }
+
+    pub fn view(&mut self) -> Element<Message> {
+        let mut column = Column::new();
+
+        for song in self.library.blocking_read().songs() {
+            column = column.push(Text::new(song.metadata.title.clone()));
+        }
+
+        column = column.push(
+            Button::new(&mut self.refresh_button, Text::new("Reload song list"))
+                .on_press(Message::ReloadSongList)
+        );
+
+        column.into()
+    }
+}
