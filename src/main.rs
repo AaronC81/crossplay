@@ -67,11 +67,12 @@ impl Application for MainView {
             Message::DownloadIdInputChange(s) => self.download_id_input = s,
             Message::StartDownload => {
                 let dl = YouTubeDownload::new(self.download_id_input.clone());
+                let library = self.library.clone();
                 return Command::perform(
-                    (async move |l: Arc<RwLock<Library>>| {
-                        let library = l.read().await;
+                    (async move || {
+                        let library = library.read().await;
                         dl.download(library).await.unwrap();
-                    })(self.library.clone()),
+                    })(),
                     |_| Message::ReloadSongList
                 )
             }
