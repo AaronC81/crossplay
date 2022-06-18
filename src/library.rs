@@ -1,6 +1,6 @@
 use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc};
 
-use id3::{Tag, TagLike, frame::Comment};
+use id3::{Tag, TagLike, frame::{Comment, Picture}};
 
 #[derive(Debug)]
 pub struct Library {
@@ -43,6 +43,7 @@ impl Library {
                             artist: tag.artist().unwrap_or("Unknown Artist").into(),
                             album: tag.artist().unwrap_or("Unknown Album").into(),
                             youtube_id: video_id.text.into(),
+                            album_art: None, // TODO
                         };
 
                         self.loaded_songs.push(Song::new(path, metadata));
@@ -73,6 +74,7 @@ pub struct SongMetadata {
     pub artist: String,
     pub album: String,
     pub youtube_id: String,
+    pub album_art: Option<Picture>,
 }
 
 const TAG_KEY_YOUTUBE_ID: &str = "[CrossPlay] YouTube ID";
@@ -99,6 +101,9 @@ impl SongMetadata {
         tag.set_title(self.title.clone());
         tag.set_artist(self.artist.clone());
         tag.set_album(self.album.clone());
+        if let Some(album_art) = self.album_art.clone() {
+            tag.add_frame(album_art);
+        }
 
         self.set_youtube_id(tag);
     }
