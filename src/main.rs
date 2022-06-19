@@ -1,10 +1,11 @@
 #![feature(async_closure)]
 #![feature(iter_intersperse)]
 
-use std::{sync::{Arc, RwLock, Mutex}, future::ready, path::PathBuf, io::BufReader, fs::File};
+use std::{sync::{Arc, RwLock, Mutex}, future::ready, path::PathBuf, io::BufReader, fs::File, time::Duration};
 
-use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
-use iced_video_player::{VideoPlayer, VideoPlayerMessage};
+use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule, Subscription, slider, Slider};
+use iced_futures::backend::default::time;
+use iced_video_player::{VideoPlayer, VideoPlayerMessage, Position};
 use library::{Library, Song};
 use ui_util::ElementContainerExtensions;
 use youtube::{YouTubeDownload, DownloadError};
@@ -56,6 +57,10 @@ impl Application for MainView {
 
     fn title(&self) -> String {
         "CrossPlay".to_string()
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        self.song_list_view.subscription()
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> { 
@@ -260,6 +265,9 @@ enum SongListMessage {
     PlaySong(Song),
     StopSong,
 
+    TickPlayer,
+    SeekSong(f64),
+
     VideoPlayerMessage(VideoPlayerMessage),
 }
 
@@ -271,7 +279,9 @@ struct SongListView {
     library: Arc<RwLock<Library>>,
     refresh_button: button::State,
     song_views: Vec<(Song, SongView)>,
+
     currently_playing_song: Option<(Song, VideoPlayer)>,
+    song_progress_slider_state: slider::State,
 }
 
 impl SongListView {
@@ -280,7 +290,9 @@ impl SongListView {
             library,
             refresh_button: button::State::new(),
             song_views: vec![],
+
             currently_playing_song: None,
+            song_progress_slider_state: slider::State::new(),
         };
         result.rebuild_song_views();
         result
@@ -296,6 +308,14 @@ impl SongListView {
 
         Column::new()
             .push_if(player.is_some(), || player.unwrap().frame_view())
+            .push_if(player.is_some(), ||
+                Slider::new(
+                    &mut self.song_progress_slider_state,
+                    0.0..=player.unwrap().duration().as_millis() as f64,
+                    player.unwrap().position().as_millis() as f64,
+                    |v| SongListMessage::SeekSong(v).into(),
+                )
+            )
             .push(Column::with_children(
                 self.song_views.iter_mut().map(|x| Some(x)).intersperse_with(|| None).map(|view|
                     if let Some((song, view)) = view {
@@ -312,13 +332,22 @@ impl SongListView {
             .into()
     }
 
+    pub fn subscription(&self) -> Subscription<Message> {
+        if self.currently_playing_song.is_some() {
+            time::every(Duration::from_millis(20)).map(|_| SongListMessage::TickPlayer.into())
+        } else {
+            Subscription::none()
+        }
+    }
+
     pub fn update(&mut self, message: SongListMessage) -> Command<Message> {
         match message {
             SongListMessage::PlaySong(song) => {
-                let player = VideoPlayer::new(
+                let mut player = VideoPlayer::new(
                     &Url::from_file_path(song.path.clone()).unwrap(),
                     false,
                 ).unwrap();
+                player.set_volume(0.2);
                 self.currently_playing_song = Some((song, player));
             },
 
@@ -328,6 +357,17 @@ impl SongListView {
                 }
                 self.currently_playing_song = None;
             },
+
+            SongListMessage::TickPlayer => {
+                // Don't need to do anything - the fact that a message has been sent is enough to 
+                // update the UI
+            }
+
+            SongListMessage::SeekSong(millis) => {
+                if let Some((_, ref mut player)) = &mut self.currently_playing_song {
+                    player.seek(Duration::from_secs_f64(millis / 1000.0)).unwrap();
+                }
+            }
 
             SongListMessage::VideoPlayerMessage(msg) => {
                 if let Some((_, ref mut player)) = &mut self.currently_playing_song {
