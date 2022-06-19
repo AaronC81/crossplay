@@ -117,6 +117,7 @@ impl YouTubeDownload {
                 album: "Unknown Album".into(),
                 youtube_id: self.id.clone(),
                 album_art: None,
+                is_cropped: false,
             });
 
         println!("[Download] Build metadata object");
@@ -140,6 +141,7 @@ impl YouTubeDownload {
             album: "Unknown Album".into(),
             youtube_id: stdout_json["id"].as_str()?.into(),
             album_art: Some(album_art),
+            is_cropped: false,
         })
     }
 }

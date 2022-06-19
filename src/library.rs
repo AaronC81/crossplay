@@ -1,6 +1,6 @@
-use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc};
+use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::Duration, process::{Command, Output}};
 
-use id3::{Tag, TagLike, frame::{Comment, Picture}};
+use id3::{Tag, TagLike, frame::{Comment, Picture, PictureType}};
 
 #[derive(Debug)]
 pub struct Library {
@@ -10,6 +10,7 @@ pub struct Library {
 
 #[derive(Debug, Clone)]
 pub enum LibraryError {
+    FfmpegNonZeroExit(Output),
     IoError(Arc<std::io::Error>),
     TagError(Arc<id3::Error>),
 }
@@ -43,7 +44,8 @@ impl Library {
                             artist: tag.artist().unwrap_or("Unknown Artist").into(),
                             album: tag.artist().unwrap_or("Unknown Album").into(),
                             youtube_id: video_id.text.into(),
-                            album_art: None, // TODO
+                            album_art: SongMetadata::get_album_art(&tag), // TODO
+                            is_cropped: SongMetadata::get_cropped(&tag),
                         };
 
                         self.loaded_songs.push(Song::new(path, metadata));
@@ -66,6 +68,57 @@ impl Song {
     fn new(path: PathBuf, metadata: SongMetadata) -> Self {
         Self { path, metadata }
     }
+
+    fn original_copy_path(&self) -> PathBuf {
+        format!("{}.original", self.path.to_string_lossy()).into()
+    }
+
+    fn create_original_copy(&self) -> Result<(), LibraryError> {
+        if self.original_copy_path().exists() { return Ok(()) }
+        std::fs::copy(&self.path, self.original_copy_path()).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+
+        Ok(())
+    }
+
+    pub fn restore_original_copy(&self) -> Result<(), LibraryError> {
+        std::fs::copy(self.original_copy_path(), &self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+
+        Ok(())
+    }
+
+    pub fn crop(&mut self, start: Duration, end: Duration) -> Result<(), LibraryError> {
+        self.create_original_copy()?;
+
+        // TODO: There are probably pure-Rust libraries for this, look into using those
+        // TODO: should this be async like downloads are?
+        println!("Starting FFMPEG...");
+
+        let output = Command::new("ffmpeg")
+            .arg("-ss")
+            .arg((start.as_secs_f64() / 1000.0).to_string())
+            .arg("-to")
+            .arg((end.as_secs_f64() / 1000.0).to_string())
+            .arg("-i")
+            .arg(self.original_copy_path())
+            .arg("-y")
+            .arg("-acodec")
+            .arg("copy")
+            .arg(&self.path)
+            .output()
+            .map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+
+        println!("FFMPEG is done!");
+
+        // Check success
+        if !output.status.success() {
+            return Err(LibraryError::FfmpegNonZeroExit(output))
+        }
+
+        self.metadata.is_cropped = true;
+        self.metadata.write_into_file(&self.path)?;
+
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -75,9 +128,12 @@ pub struct SongMetadata {
     pub album: String,
     pub youtube_id: String,
     pub album_art: Option<Picture>,
+
+    pub is_cropped: bool,
 }
 
 const TAG_KEY_YOUTUBE_ID: &str = "[CrossPlay] YouTube ID";
+const TAG_KEY_IS_CROPPED: &str = "[CrossPlay] Cropped";
 
 impl SongMetadata {
     fn get_youtube_id(tag: &Tag) -> Option<Comment> {
@@ -97,6 +153,32 @@ impl SongMetadata {
         });
     }
 
+    fn get_cropped(tag: &Tag) -> bool {
+        tag.comments().find(|c| { c.description == TAG_KEY_IS_CROPPED }).is_some()
+    }
+
+    fn mark_cropped(&self, tag: &mut Tag) {
+        tag.add_frame(Comment {
+            lang: "eng".into(),
+            description: TAG_KEY_IS_CROPPED.into(),
+            text: "".into(),
+        });
+    }
+
+    fn get_album_art(tag: &Tag) -> Option<Picture> {
+        tag.frames().find_map(|f|
+            if let Some(picture) = f.content().picture() {
+                if picture.picture_type == PictureType::CoverFront {
+                    Some(picture.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        )
+    }
+
     fn write_into_tag(&self, tag: &mut Tag) {
         tag.set_title(self.title.clone());
         tag.set_artist(self.artist.clone());
@@ -104,8 +186,11 @@ impl SongMetadata {
         if let Some(album_art) = self.album_art.clone() {
             tag.add_frame(album_art);
         }
-
         self.set_youtube_id(tag);
+
+        if self.is_cropped {
+            self.mark_cropped(tag);
+        }
     }
 
     pub(crate) fn write_into_file(&self, file: &Path) -> Result<(), LibraryError> {
