@@ -1,4 +1,4 @@
-use iced::{Element, Row, Column};
+use iced::{Element, Row, Column, container};
 
 pub(crate) trait ElementContainerExtensions<'a, Message> where Self: Sized {
     fn push(self, child: impl Into<Element<'a, Message>>) -> Self;
@@ -19,3 +19,6 @@ impl<'a, Message> ElementContainerExtensions<'a, Message> for Row<'a, Message> {
 impl<'a, Message> ElementContainerExtensions<'a, Message> for Column<'a, Message> {
     fn push(self, child: impl Into<Element<'a, Message>>) -> Self { self.push(child) }
 }
+
+pub struct ContainerStyleSheet(pub container::Style);
+impl container::StyleSheet for ContainerStyleSheet { fn style(&self) -> container::Style { self.0 } }
