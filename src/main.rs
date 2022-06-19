@@ -4,24 +4,17 @@
 use std::{sync::{Arc, RwLock, Mutex}, future::ready, path::PathBuf, io::BufReader, fs::File};
 
 use iced::{Column, Text, Element, Settings, Application, executor, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
+use iced_video_player::{VideoPlayer, VideoPlayerMessage};
 use library::{Library, Song};
-use rodio::{OutputStream, Decoder, Source, Sink, OutputStreamHandle};
 use ui_util::ElementContainerExtensions;
 use youtube::{YouTubeDownload, DownloadError};
+use url::Url;
 
 mod youtube;
 mod library;
 mod ui_util;
 
-static mut OUTPUT_STREAM: Option<OutputStream> = None;
-static mut OUTPUT_STREAM_HANDLE: Option<OutputStreamHandle> = None;
-
 fn main() {
-    unsafe {
-        let (stream, stream_handle) = OutputStream::try_default().unwrap();
-        OUTPUT_STREAM = Some(stream);
-        OUTPUT_STREAM_HANDLE = Some(stream_handle);
-    }
     MainView::run(Settings::with_flags(())).unwrap();
 }
 
@@ -265,8 +258,9 @@ impl DownloadView {
 #[derive(Debug, Clone)]
 enum SongListMessage {
     PlaySong(Song),
-    PlaySongWorker,
     StopSong,
+
+    VideoPlayerMessage(VideoPlayerMessage),
 }
 
 impl From<SongListMessage> for Message {
@@ -277,7 +271,7 @@ struct SongListView {
     library: Arc<RwLock<Library>>,
     refresh_button: button::State,
     song_views: Vec<(Song, SongView)>,
-    currently_playing_song: Arc<RwLock<Option<(Song, Sink)>>>,
+    currently_playing_song: Option<(Song, VideoPlayer)>,
 }
 
 impl SongListView {
@@ -286,17 +280,22 @@ impl SongListView {
             library,
             refresh_button: button::State::new(),
             song_views: vec![],
-            currently_playing_song: Arc::new(RwLock::new(None)),
+            currently_playing_song: None,
         };
         result.rebuild_song_views();
         result
     }
 
     pub fn view(&mut self) -> Element<Message> {
-        let currently_playing_song = self.currently_playing_song.read().unwrap();
-        let currently_playing_song = currently_playing_song.as_ref().map(|x| &x.0);
+        let mut currently_playing_song = None;
+        let mut player = None;
+        if let Some((cps, p)) = &self.currently_playing_song {
+            currently_playing_song = Some(cps);
+            player = Some(p);
+        }
 
         Column::new()
+            .push_if(player.is_some(), || player.unwrap().frame_view())
             .push(Column::with_children(
                 self.song_views.iter_mut().map(|x| Some(x)).intersperse_with(|| None).map(|view|
                     if let Some((song, view)) = view {
@@ -316,45 +315,25 @@ impl SongListView {
     pub fn update(&mut self, message: SongListMessage) -> Command<Message> {
         match message {
             SongListMessage::PlaySong(song) => {
-                let currently_playing_song = self.currently_playing_song.clone();
-
-                if currently_playing_song.read().unwrap().is_some() {
-                    return Command::none();
-                }
-
-                return Command::perform((async move || {
-                    // Safety: The `if` above would've bailed if something else is playing audio, so
-                    // we're definitely the only thread doing so.
-                    let stream_handle = unsafe { OUTPUT_STREAM_HANDLE.as_ref().unwrap() };
-
-                    let sink = Sink::try_new(stream_handle).unwrap();
-                    let file = BufReader::new(File::open(song.path.clone()).unwrap());
-                    let source = Decoder::new(file).unwrap();
-                    sink.set_volume(0.1);
-                    sink.append(source);
-
-                    *currently_playing_song.write().unwrap() = Some((song, sink));
-                })(), |_| SongListMessage::PlaySongWorker.into());
-            },
-
-            SongListMessage::PlaySongWorker => {
-                let currently_playing_song = self.currently_playing_song.clone();
-
-                return Command::perform((async move || {
-                    currently_playing_song.read().unwrap().as_ref().unwrap().1.sleep_until_end();
-                })(), |_| Message::None);
+                let player = VideoPlayer::new(
+                    &Url::from_file_path(song.path.clone()).unwrap(),
+                    false,
+                ).unwrap();
+                self.currently_playing_song = Some((song, player));
             },
 
             SongListMessage::StopSong => {
-                let currently_playing_song = self.currently_playing_song.read().unwrap();
-                if let Some((_, sink)) = &*currently_playing_song {
-                    sink.stop();
+                if let Some((_, ref mut player)) = &mut self.currently_playing_song {
+                    player.set_paused(true);
                 }
-                drop(currently_playing_song);
-
-                let mut currently_playing_song = self.currently_playing_song.write().unwrap();
-                *currently_playing_song = None;
+                self.currently_playing_song = None;
             },
+
+            SongListMessage::VideoPlayerMessage(msg) => {
+                if let Some((_, ref mut player)) = &mut self.currently_playing_song {
+                    return player.update(msg).map(|m| SongListMessage::VideoPlayerMessage(m).into())
+                }
+            }
         }
 
         Command::none()

@@ -14,5 +14,7 @@ serde = "1.0.137"
 serde_json = "1.0.81"
 tokio = { version = "1.19.2", features = ["rt-multi-thread", "macros", "sync"] }
 image = "0.24.2"
-rodio = "0.15.0"
 iced_futures = "0.4.1"
+iced_video_player = { git = "https://github.com/AaronC81/iced_video_player" }
+url = "2.2.2"
+gstreamer = "0.18.8"
