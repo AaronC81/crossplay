@@ -100,24 +100,22 @@ impl SongView {
                     .push(Text::new(self.song.metadata.artist.clone()).color([0.3, 0.3, 0.3]))
             )
             .push(Space::with_width(Length::Fill))
+            // TODO: these buttons aren't responsive at all!
+            // Too long a title will cause these to go tiny
             .push(
-                Column::new()
-                    .spacing(1)
-                    .width(Length::Units(140))
-                    .push(
-                        Button::new(Text::new(if self.song.is_modified() { "Restore original" } else { "Unmodified" }).horizontal_alignment(Horizontal::Center).width(Length::Fill))
-                            .on_press_if(self.song.is_modified(), SongListMessage::RestoreOriginal(self.song.clone()).into())
-                            .width(Length::Fill)
-                    )
-                    .push(Button::new(Text::new("Edit metadata").horizontal_alignment(Horizontal::Center).width(Length::Fill))
-                        .on_press(ContentMessage::OpenEditMetadata(self.song.clone()).into())
-                        .width(Length::Fill)
-                    )
-                    .push(
-                        Button::new(Text::new(if self.song.metadata.is_cropped { "Cropped" } else { "Crop" }).width(Length::Fill).horizontal_alignment(Horizontal::Center))
-                            .on_press_if(!self.song.metadata.is_cropped, ContentMessage::OpenCrop(self.song.clone()).into())
-                            .width(Length::Fill)
-                    )
+                Button::new(Image::new(Handle::from_path("assets/edit.png")))
+                    .on_press(ContentMessage::OpenEditMetadata(self.song.clone()).into())
+                    .width(Length::Units(40))
+            )
+            .push(
+                Button::new(Image::new(Handle::from_path(if self.song.metadata.is_cropped { "assets/crop_disabled.png" } else { "assets/crop.png" })))
+                    .on_press_if(!self.song.metadata.is_cropped, ContentMessage::OpenCrop(self.song.clone()).into())
+                    .width(Length::Units(40))
+            )
+            .push(
+                Button::new(Image::new(Handle::from_path(if self.song.is_modified() { "assets/restore.png" } else { "assets/restore_disabled.png" })))
+                    .on_press_if(self.song.is_modified(), SongListMessage::RestoreOriginal(self.song.clone()).into())
+                    .width(Length::Units(40))
             )
             .into()
     }
