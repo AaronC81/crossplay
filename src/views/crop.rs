@@ -1,10 +1,10 @@
-use std::{time::Duration, future::ready, cell::RefCell};
+use std::{time::Duration, future::ready, cell::RefCell, cmp::max};
 
-use iced::{Command, Subscription, time, pure::{Element, widget::{Column, Slider, Button, Text, Row}}, Alignment, Length, Rule};
+use iced::{Command, Subscription, time, pure::{Element, widget::{Column, Slider, Button, Text, Row, Container}}, Alignment, Length, Rule, Space, container::Style, Background};
 use iced_video_player::{VideoPlayer, VideoPlayerMessage};
 use url::Url;
 
-use crate::{library::Song, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}};
+use crate::{library::Song, Message, ui_util::{ElementContainerExtensions, ButtonExtensions, ContainerStyleSheet}};
 
 use super::content::ContentMessage;
 
@@ -121,12 +121,12 @@ impl CropView {
 
     pub fn view(&self) -> Element<Message> {
         Column::new()
-            .align_items(Alignment::Center)
             .padding(10)
             .spacing(10)
-            .push(Text::new("Crop").size(28))
+            .push(Text::new(format!("Crop: {}", self.song.metadata.title)).size(28))
             .push(self.player.frame_view()) // Actually invisible
             .push(self.player_controls())
+            .push(Rule::horizontal(1))
             .push(
                 Row::new()
                     .push(self.marker_display("Start", &self.crop_start_point, CropMessage::SetStart, CropMessage::JumpStart))
@@ -134,13 +134,18 @@ impl CropView {
                     .height(Length::Shrink)
             )
             .push(
-                Row::new()
-                    .padding(10)
-                    .spacing(10)
-                    .push(Button::new(Text::new("Cancel"))
-                        .on_press(ContentMessage::OpenSongList.into()))
-                    .push(Button::new(Text::new("Apply and save"))
-                        .on_press_if(self.crop_start_point.is_some() && self.crop_end_point.is_some(), CropMessage::ApplyCrop.into()))
+                Column::new()
+                    .align_items(Alignment::Center)
+                    .width(Length::Fill)
+                    .push(
+                        Row::new()
+                            .padding(10)
+                            .spacing(10)
+                            .push(Button::new(Text::new("Cancel"))
+                                .on_press(ContentMessage::OpenSongList.into()))
+                            .push(Button::new(Text::new("Apply and save"))
+                                .on_press_if(self.crop_start_point.is_some() && self.crop_end_point.is_some(), CropMessage::ApplyCrop.into()))
+                    )
             )
             .into()
     }
@@ -150,6 +155,7 @@ impl CropView {
             .align_items(Alignment::Center)
             .padding(10)
             .spacing(10)
+            .push(Text::new("Media player").size(25))
             .push(
                 Slider::new(
                     0.0..=self.player.duration().as_millis() as f64,
@@ -158,9 +164,51 @@ impl CropView {
                 )
                     .on_release(CropMessage::SeekSong.into())
             )
+            .push(self.player_controls_markers())
             .push(Text::new(Self::render_millis(self.slider_millis())))
             .push(Button::new(Text::new(if self.player.paused() { "Play" } else { "Pause" }))
                 .on_press(CropMessage::PlayPauseSong.into()))
+            .into()
+    }
+
+    fn player_controls_markers(&self) -> Element<Message> {
+        // This is, genuinely, one of the worst things I've ever written
+        // I couldn't get SVG rendering at the width of the window to work consistently, so instead
+        // we exploit a 1000-ish element flex-style layout to draw a line at any point along the
+        // width of the screen
+
+        fn pad(ratio: f64) -> Space {
+            Space::with_width(Length::FillPortion(max((1000.0 * ratio).round() as u16, 1)))
+        }
+
+        fn pin<'a>(colour: [f32; 3]) -> Container<'a, Message> {
+            Container::new(Space::new(Length::Units(1), Length::Units(20))).style(ContainerStyleSheet(Style {
+                background: Some(Background::Color(colour.into())),
+                ..Default::default()
+            }))
+        }
+
+        match (self.crop_start_point, self.crop_end_point) {
+            (None, None) => Row::new(),
+            
+            (Some(start), None) => Row::new()
+                .push(pad(self.millis_ratio(start)))
+                .push(pin([0.0, 0.0, 1.0]))
+                .push(pad(1.0 - self.millis_ratio(start))),
+
+            (None, Some(end)) => Row::new()
+                .push(pad(self.millis_ratio(end)))
+                .push(pin([1.0, 0.0, 0.0]))
+                .push(pad(1.0 - self.millis_ratio(end))),
+
+            (Some(start), Some(end)) => Row::new()
+                .push(pad(self.millis_ratio(start)))
+                .push(pin([0.0, 0.0, 1.0]))
+                .push(pad(self.millis_ratio(end) - self.millis_ratio(start)))
+                .push(pin([1.0, 0.0, 0.0]))
+                .push(pad(1.0 - self.millis_ratio(end))),
+        }
+            .height(Length::Units(20))
             .into()
     }
 
@@ -199,6 +247,10 @@ impl CropView {
                 *self.last_drawn_slider_position.borrow()
             }
         }
+    }
+
+    pub fn millis_ratio(&self, millis: f64) -> f64 {
+        millis / (self.player.duration().as_secs_f64() * 1000.0)
     }
 
     pub fn render_millis(millis: f64) -> String {
