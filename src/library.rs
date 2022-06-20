@@ -87,6 +87,10 @@ impl Song {
         Ok(())
     }
 
+    pub fn is_modified(&self) -> bool {
+        self.metadata.is_cropped || self.metadata.is_metadata_edited
+    }
+
     pub fn crop(&mut self, start: Duration, end: Duration) -> Result<(), LibraryError> {
         self.create_original_copy()?;
 

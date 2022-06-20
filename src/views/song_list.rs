@@ -1,7 +1,7 @@
 use std::{sync::{Arc, RwLock}, future::ready};
 
-use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule}}};
-use crate::{library::{Library, Song}, Message, ui_util::ElementContainerExtensions};
+use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
+use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}};
 
 use super::content::ContentMessage;
 
@@ -86,17 +86,39 @@ impl SongView {
     }
 
     pub fn view(&self) -> Element<Message> {
-        Column::new()
-            .push(Text::new(self.song.metadata.title.clone()))
-            .push_if(self.song.metadata.is_cropped || self.song.metadata.is_metadata_edited, ||
-                Button::new(Text::new("Restore original"))
-                    .on_press(SongListMessage::RestoreOriginal(self.song.clone()).into()))
-            .push(Button::new(Text::new("Edit metadata"))
-                .on_press(ContentMessage::OpenEditMetadata(self.song.clone()).into()))
-            .push_if(!self.song.metadata.is_cropped, ||
-                Button::new(Text::new("Crop"))
-                    .on_press(ContentMessage::OpenCrop(self.song.clone()).into()))
+        Row::new()
             .padding(10)
+            .spacing(10)
+            .align_items(Alignment::Center)
+            .push_if_let(&self.song.metadata.album_art, |art|
+                Image::new(Handle::from_memory(art.data.clone()))
+                    .width(Length::Units(100))
+            )
+            .push(
+                Column::new()
+                    .push(Text::new(self.song.metadata.title.clone()))
+                    .push(Text::new(self.song.metadata.artist.clone()).color([0.3, 0.3, 0.3]))
+            )
+            .push(Space::with_width(Length::Fill))
+            .push(
+                Column::new()
+                    .spacing(1)
+                    .width(Length::Units(140))
+                    .push(
+                        Button::new(Text::new(if self.song.is_modified() { "Restore original" } else { "Unmodified" }).horizontal_alignment(Horizontal::Center).width(Length::Fill))
+                            .on_press_if(self.song.is_modified(), SongListMessage::RestoreOriginal(self.song.clone()).into())
+                            .width(Length::Fill)
+                    )
+                    .push(Button::new(Text::new("Edit metadata").horizontal_alignment(Horizontal::Center).width(Length::Fill))
+                        .on_press(ContentMessage::OpenEditMetadata(self.song.clone()).into())
+                        .width(Length::Fill)
+                    )
+                    .push(
+                        Button::new(Text::new(if self.song.metadata.is_cropped { "Cropped" } else { "Crop" }).width(Length::Fill).horizontal_alignment(Horizontal::Center))
+                            .on_press_if(!self.song.metadata.is_cropped, ContentMessage::OpenCrop(self.song.clone()).into())
+                            .width(Length::Fill)
+                    )
+            )
             .into()
     }
 }
