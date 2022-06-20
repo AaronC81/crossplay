@@ -140,6 +140,8 @@ impl DownloadView {
                 let async_dl = YouTubeDownload::new(self.id_input.clone());
                 let result_dl = async_dl.clone();
                 self.downloads_in_progress.push(result_dl.clone());
+
+                self.id_input = "".to_string();
                 
                 let library_path = self.library.read().unwrap().path.clone();
                 return Command::perform(

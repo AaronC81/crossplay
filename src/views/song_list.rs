@@ -1,6 +1,6 @@
 use std::{sync::{Arc, RwLock}, future::ready};
 
-use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
+use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button, Scrollable}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
 use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}};
 
 use super::content::ContentMessage;
@@ -29,21 +29,24 @@ impl SongListView {
     }
 
     pub fn view(&self) -> Element<Message> {
-        Column::new()
-            .push(Column::with_children(
-                self.song_views.iter().map(|x| Some(x)).intersperse_with(|| None).map(|view|
-                    if let Some((_, view)) = view {
-                        view.view().into()
-                    } else {
-                        Rule::horizontal(10).into()
-                    }
-                ).collect()
-            ))
-            .push(
-                Button::new(Text::new("Reload song list"))
-                    .on_press(SongListMessage::RefreshSongList.into())
-            )
-            .into()
+        Scrollable::new(
+            Column::new()
+                .align_items(Alignment::Center)
+                .spacing(10)
+                .push(Column::with_children(
+                    self.song_views.iter().map(|x| Some(x)).intersperse_with(|| None).map(|view|
+                        if let Some((_, view)) = view {
+                            view.view().into()
+                        } else {
+                            Rule::horizontal(10).into()
+                        }
+                    ).collect()
+                ))
+                .push(
+                    Button::new(Text::new("Refresh"))
+                        .on_press(SongListMessage::RefreshSongList.into())
+                )
+        ).into()
     }
 
     pub fn update(&mut self, message: SongListMessage) -> Command<Message> {
