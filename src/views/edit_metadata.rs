@@ -1,8 +1,8 @@
 use std::future::ready;
 
-use iced::{Command, pure::{widget::{TextInput, Button, Column, Text}, Element}};
+use iced::{Command, pure::{widget::{TextInput, Button, Column, Text, Row}, Element}, Length, Alignment, Image, image::Handle};
 
-use crate::{library::Song, Message};
+use crate::{library::Song, Message, ui_util::ElementContainerExtensions};
 
 use super::content::ContentMessage;
 
@@ -46,11 +46,41 @@ impl EditMetadataView {
         Column::new()
             .padding(10)
             .spacing(10)
-            .push(TextInput::new("", &self.song.metadata.title, |v| EditMetadataMessage::TitleChange(v).into()))
-            .push(TextInput::new("", &self.song.metadata.artist, |v| EditMetadataMessage::ArtistChange(v).into()))
-            .push(TextInput::new("", &self.song.metadata.album, |v| EditMetadataMessage::AlbumChange(v).into()))
-            .push(Button::new(Text::new("Apply and save"))
-                .on_press(EditMetadataMessage::ApplyMetadataEdit.into()))
+            .push(Text::new("Edit Metadata").size(28))
+            .push(
+                Row::new()
+                    .spacing(10)
+                    .align_items(Alignment::Center)
+                    .push_if_let(&self.song.metadata.album_art, |art|
+                        Image::new(Handle::from_memory(art.data.clone()))
+                            .width(Length::FillPortion(1))
+                    )
+                    .push(
+                        Column::new()
+                            .spacing(10)
+                            .push(self.field("Title", &self.song.metadata.title, |v| EditMetadataMessage::TitleChange(v).into()))
+                            .push(self.field("Artist", &self.song.metadata.artist, |v| EditMetadataMessage::ArtistChange(v).into()))
+                            .push(self.field("Album", &self.song.metadata.album, |v| EditMetadataMessage::AlbumChange(v).into()))
+                            .push(
+                                Row::new()
+                                    .spacing(10)
+                                    .push(Button::new(Text::new("Cancel"))
+                                        .on_press(ContentMessage::OpenSongList.into()))
+                                    .push(Button::new(Text::new("Apply and save"))
+                                        .on_press(EditMetadataMessage::ApplyMetadataEdit.into()))
+                            )
+                            .width(Length::FillPortion(2))
+                    )
+            )
+            .into()
+    }
+
+    pub fn field<'a>(&'a self, label: &str, value: &str, func: impl Fn(String) -> Message + 'a) -> Element<Message> {
+        Row::new()
+            .spacing(10)
+            .align_items(Alignment::Center)
+            .push(Text::new(format!("{}:", label)).width(Length::Units(50)))
+            .push(TextInput::new("", value, func).padding(5))
             .into()
     }
 }
