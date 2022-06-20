@@ -1,10 +1,10 @@
 use std::{time::Duration, future::ready, cell::RefCell};
 
-use iced::{Command, Subscription, time, pure::{Element, widget::{Column, Slider, Button, Text, Row}}};
+use iced::{Command, Subscription, time, pure::{Element, widget::{Column, Slider, Button, Text, Row}}, Alignment, Length, Rule};
 use iced_video_player::{VideoPlayer, VideoPlayerMessage};
 use url::Url;
 
-use crate::{library::Song, Message, ui_util::ElementContainerExtensions};
+use crate::{library::Song, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}};
 
 use super::content::ContentMessage;
 
@@ -121,62 +121,94 @@ impl CropView {
 
     pub fn view(&self) -> Element<Message> {
         Column::new()
+            .align_items(Alignment::Center)
             .padding(10)
             .spacing(10)
-            .push(self.player.frame_view())
+            .push(Text::new("Crop").size(28))
+            .push(self.player.frame_view()) // Actually invisible
+            .push(self.player_controls())
+            .push(
+                Row::new()
+                    .push(self.marker_display("Start", &self.crop_start_point, CropMessage::SetStart, CropMessage::JumpStart))
+                    .push(self.marker_display("End", &self.crop_end_point, CropMessage::SetEnd, CropMessage::JumpEnd))
+                    .height(Length::Shrink)
+            )
+            .push(
+                Row::new()
+                    .padding(10)
+                    .spacing(10)
+                    .push(Button::new(Text::new("Cancel"))
+                        .on_press(ContentMessage::OpenSongList.into()))
+                    .push(Button::new(Text::new("Apply and save"))
+                        .on_press_if(self.crop_start_point.is_some() && self.crop_end_point.is_some(), CropMessage::ApplyCrop.into()))
+            )
+            .into()
+    }
+
+    fn player_controls(&self) -> Element<Message> {
+        Column::new()
+            .align_items(Alignment::Center)
+            .padding(10)
+            .spacing(10)
             .push(
                 Slider::new(
                     0.0..=self.player.duration().as_millis() as f64,
-                    {
-                        if let Some((target, _)) = self.seek_song_target {
-                            target
-                        } else {
-                            let new_position = self.player.position().as_millis() as f64;
-                            if new_position > 0.0 {
-                                *self.last_drawn_slider_position.borrow_mut() = new_position;
-                                new_position
-                            } else {
-                                *self.last_drawn_slider_position.borrow()
-                            }
-                        }
-                    },
+                    self.slider_millis(),
                     |v| CropMessage::SetSeekSongTarget(v).into(),
                 )
                     .on_release(CropMessage::SeekSong.into())
             )
+            .push(Text::new(Self::render_millis(self.slider_millis())))
             .push(Button::new(Text::new(if self.player.paused() { "Play" } else { "Pause" }))
                 .on_press(CropMessage::PlayPauseSong.into()))
-            .push(
-                Row::new()
-                    .padding(10)
-                    .push(Text::new("Start point:"))
-                    .push(Button::new(Text::new("Set"))
-                        .on_press(CropMessage::SetStart.into()))
-                    .push_if(self.crop_start_point.is_some(), ||
-                        Button::new(Text::new("Jump"))
-                            .on_press(CropMessage::JumpStart.into()))
-                    .push_if(self.crop_start_point.is_some(), ||
-                        Text::new(format!("{}", self.crop_start_point.unwrap() / 1000.0)))
-            )
-            .push(
-                Row::new()
-                    .padding(10)
-                    .push(Text::new("End point:"))
-                    .push(Button::new(Text::new("Set"))
-                        .on_press(CropMessage::SetEnd.into()))
-                    .push_if(self.crop_end_point.is_some(), ||
-                        Button::new(Text::new("Jump"))
-                            .on_press(CropMessage::JumpEnd.into()))
-                    .push_if(self.crop_end_point.is_some(), ||
-                        Text::new(format!("{}", self.crop_end_point.unwrap() / 1000.0)))
-            )
-            .push_if(
-                self.crop_start_point.is_some() && self.crop_end_point.is_some(),
-                || Button::new(Text::new("Apply and save"))
-                    .on_press(CropMessage::ApplyCrop.into()))
-            .push(Button::new(Text::new("Cancel"))
-                .on_press(ContentMessage::OpenSongList.into()))
             .into()
+    }
+
+    fn marker_display(&self, name: &str, value: &Option<f64>, set: CropMessage, jump: CropMessage) -> Element<Message> {
+        Column::new()
+            .align_items(Alignment::Center)
+            .padding(10)
+            .spacing(10)
+            .width(Length::Fill)
+            .push(Text::new(format!("{} point", name)).size(25))
+            .push(
+                Text::new(
+                    if let Some(value) = value {
+                        Self::render_millis(*value)
+                    } else {
+                        "Not set".to_string()
+                    }
+                )
+            )
+            .push(Button::new(Text::new("Set"))
+                .on_press(set.into()))
+            .push(Button::new(Text::new("Jump"))
+                .on_press_if(value.is_some(), jump.into()))
+            .into()
+    }
+
+    pub fn slider_millis(&self) -> f64 {
+        if let Some((target, _)) = self.seek_song_target {
+            target
+        } else {
+            let new_position = self.player.position().as_millis() as f64;
+            if new_position > 0.0 {
+                *self.last_drawn_slider_position.borrow_mut() = new_position;
+                new_position
+            } else {
+                *self.last_drawn_slider_position.borrow()
+            }
+        }
+    }
+
+    pub fn render_millis(millis: f64) -> String {
+        let total_seconds = (millis / 1000.0).floor() as i32;
+
+        let partitioned_minutes = total_seconds / 60;
+        let partitioned_seconds = total_seconds % 60;
+        let partitioned_millis = (millis % 1000.0).floor() as i32;
+
+        format!("{:0>2}:{:0>2}:{:0>3}", partitioned_minutes, partitioned_seconds, partitioned_millis)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
