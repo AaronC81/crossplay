@@ -1,6 +1,7 @@
 use std::{sync::{Arc, RwLock}, future::ready};
 
 use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button, Scrollable}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
+use native_dialog::{MessageDialog, MessageType};
 use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}};
 
 use super::content::ContentMessage;
@@ -9,6 +10,7 @@ use super::content::ContentMessage;
 pub enum SongListMessage {
     RefreshSongList,
     RestoreOriginal(Song),
+    Delete(Song),
 }
 
 impl From<SongListMessage> for Message {
@@ -57,9 +59,42 @@ impl SongListView {
             }
 
             SongListMessage::RestoreOriginal(song) => {
-                song.restore_original_copy().unwrap();
-                Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
-            } 
+                let confirmation = MessageDialog::new()
+                    .set_title("Restore original?")
+                    .set_text(&format!(
+                        "This will undo any metadata modifications, and remove the crop if applied. Are you sure you would like to restore '{}'?",
+                        song.metadata.title,
+                    ))
+                    .set_type(MessageType::Warning)
+                    .show_confirm()
+                    .unwrap();
+
+                if confirmation {
+                    song.restore_original_copy().unwrap();
+                    Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
+                } else {
+                    Command::none()
+                }
+            }
+
+            SongListMessage::Delete(mut song) => {
+                let confirmation = MessageDialog::new()
+                    .set_title("Delete song?")
+                    .set_text(&format!(
+                        "This will permanently delete the song and any modifications made to it. Are you sure you would like to delete '{}'?",
+                        song.metadata.title,
+                    ))
+                    .set_type(MessageType::Warning)
+                    .show_confirm()
+                    .unwrap();
+
+                if confirmation {
+                    song.delete().expect("delete failed");
+                    Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
+                } else {
+                    Command::none()
+                }
+            }
         }
     }
 
@@ -118,6 +153,11 @@ impl SongView {
             .push(
                 Button::new(Image::new(Handle::from_path(if self.song.is_modified() { "assets/restore.png" } else { "assets/restore_disabled.png" })))
                     .on_press_if(self.song.is_modified(), SongListMessage::RestoreOriginal(self.song.clone()).into())
+                    .width(Length::Units(40))
+            )
+            .push(
+                Button::new(Image::new(Handle::from_path("assets/delete.png")))
+                    .on_press(SongListMessage::Delete(self.song.clone()).into())
                     .width(Length::Units(40))
             )
             .into()

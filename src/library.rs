@@ -133,6 +133,15 @@ impl Song {
 
         Ok(())
     }
+
+    pub fn delete(&mut self) -> Result<(), LibraryError> {
+        if self.original_copy_path().exists() {
+            std::fs::remove_file(self.original_copy_path()).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+        }
+        std::fs::remove_file(&self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
