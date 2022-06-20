@@ -5,7 +5,7 @@ use std::{sync::{Arc, RwLock}};
 
 use iced::{Column, Element, Settings, Application, executor, Command, Subscription};
 use library::Library;
-use views::{download::{DownloadMessage, DownloadView}, song_list::{SongListMessage, SongListView}};
+use views::{download::{DownloadMessage, DownloadView}, song_list::{SongListMessage, SongListView}, content::{ContentMessage, ContentView}};
 
 mod youtube;
 mod library;
@@ -20,14 +20,14 @@ fn main() {
 pub enum Message {
     None,
     DownloadMessage(DownloadMessage),
-    SongListMessage(SongListMessage),
+    ContentMessage(ContentMessage),
 }
 
 struct MainView {
     library: Arc<RwLock<Library>>,
     
-    song_list_view: SongListView,
     download_view: DownloadView,
+    content_view: ContentView,
 }
 
 impl Application for MainView {
@@ -44,8 +44,8 @@ impl Application for MainView {
             MainView {
                 library: library.clone(),
 
-                song_list_view: SongListView::new(library.clone()),
                 download_view: DownloadView::new(library.clone()),
+                content_view: ContentView::new(library.clone()),
             },
             Command::none()
         )
@@ -56,13 +56,13 @@ impl Application for MainView {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        self.song_list_view.subscription()
+        self.content_view.subscription()
     }
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> { 
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {         
         match message {
             Message::None => (),
-            Message::SongListMessage(slm) => return self.song_list_view.update(slm),
+            Message::ContentMessage(cm) => return self.content_view.update(cm),
             Message::DownloadMessage(dm) => return self.download_view.update(dm),
         }
 
@@ -72,7 +72,7 @@ impl Application for MainView {
     fn view(&mut self) -> Element<'_, Self::Message> {
         Column::new()
             .push(self.download_view.view())
-            .push(self.song_list_view.view())
+            .push(self.content_view.view())
             .into()
     }
 }
