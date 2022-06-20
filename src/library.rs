@@ -95,9 +95,9 @@ impl Song {
 
         let output = Command::new("ffmpeg")
             .arg("-ss")
-            .arg((start.as_secs_f64() / 1000.0).to_string())
+            .arg((start.as_secs_f64()).to_string())
             .arg("-to")
-            .arg((end.as_secs_f64() / 1000.0).to_string())
+            .arg((end.as_secs_f64()).to_string())
             .arg("-i")
             .arg(self.original_copy_path())
             .arg("-y")

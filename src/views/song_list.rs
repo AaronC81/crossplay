@@ -299,7 +299,7 @@ impl SongListView {
 
             SongListMessage::ApplyCrop => {
                 if let SongListViewState::CropMode { song, crop_start_point, crop_end_point, .. } = &mut self.state {
-                    song.crop(Duration::from_secs_f64(crop_start_point.unwrap()), Duration::from_secs_f64(crop_end_point.unwrap())).unwrap();
+                    song.crop(Duration::from_secs_f64(crop_start_point.unwrap() / 1000.0), Duration::from_secs_f64(crop_end_point.unwrap() / 1000.0)).unwrap();
                     return Command::perform(ready(()), |_| SongListMessage::ExitCropMode.into())
                 }
             }
