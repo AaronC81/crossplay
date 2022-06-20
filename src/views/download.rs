@@ -1,6 +1,6 @@
 use std::{sync::{Arc, RwLock}, future::ready};
 
-use iced::{Column, Text, Element, Command, Button, button, TextInput, text_input, Row, Container, container, Background, Length, alignment::Vertical, Rule};
+use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container}}, container, Background, Length, alignment::Vertical, Rule, Command};
 use crate::{youtube::{YouTubeDownload, DownloadError}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
 use super::song_list::SongListMessage;
 
@@ -18,14 +18,9 @@ impl From<DownloadMessage> for Message {
 
 pub struct DownloadView {
     library: Arc<RwLock<Library>>,
-
-    id_state: text_input::State,
     id_input: String,
-
     status_showing: bool,
-    status_button_state: button::State,
 
-    download_button_state: button::State,
     downloads_in_progress: Vec<YouTubeDownload>,
     download_errors: Vec<(YouTubeDownload, DownloadError)>,
     any_download_occurred: bool,
@@ -35,18 +30,15 @@ impl DownloadView {
     pub fn new(library: Arc<RwLock<Library>>) -> Self {
         Self {
             library,
-            id_state: text_input::State::new(),
             id_input: "".to_string(),
             status_showing: false,
-            status_button_state: button::State::new(),
-            download_button_state: button::State::new(),
             downloads_in_progress: vec![],
             download_errors: vec![],
             any_download_occurred: false,
         }
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         Column::new()
             .push(
                 Container::new(
@@ -56,7 +48,6 @@ impl DownloadView {
                         .height(Length::Units(60))
                         .push(
                             TextInput::new(
-                                &mut self.id_state, 
                                 "Paste a YouTube video ID...", 
                                 &self.id_input, 
                                 |s| DownloadMessage::IdInputChange(s).into(),
@@ -65,7 +56,6 @@ impl DownloadView {
                         )
                         .push(
                             Button::new(
-                                &mut self.download_button_state,
                                 Text::new("Download")
                                     .vertical_alignment(Vertical::Center)
                                     .height(Length::Fill)
@@ -75,7 +65,6 @@ impl DownloadView {
                         )
                         .push(
                             Button::new(
-                                &mut self.status_button_state,
                                 Row::new()
                                     .height(Length::Fill)
                                     .push(

@@ -1,6 +1,6 @@
-use std::{time::Duration, future::ready};
+use std::{time::Duration, future::ready, cell::RefCell};
 
-use iced::{slider, button, Command, Element, Column, Slider, Button, Text, Row, Subscription, time};
+use iced::{Command, Subscription, time, pure::{Element, widget::{Column, Slider, Button, Text, Row}}};
 use iced_video_player::{VideoPlayer, VideoPlayerMessage};
 use url::Url;
 
@@ -32,19 +32,11 @@ pub struct CropView {
     song: Song,
     player: VideoPlayer,
 
-    song_progress_slider_state: slider::State,
-    play_button_state: button::State,
-    exit_button_state: button::State,
     seek_song_target: Option<(f64, bool)>,
-    last_drawn_slider_position: f64,
+    last_drawn_slider_position: RefCell<f64>,
 
     crop_start_point: Option<f64>,
     crop_end_point: Option<f64>,
-    crop_set_start_button_state: button::State,
-    crop_jump_start_button_state: button::State,
-    crop_set_end_button_state: button::State,
-    crop_jump_end_button_state: button::State,
-    crop_apply_button_state: button::State,
 }
 
 impl CropView {
@@ -60,19 +52,11 @@ impl CropView {
             song,
             player,
 
-            song_progress_slider_state: slider::State::new(),
-            play_button_state: button::State::new(),
-            exit_button_state: button::State::new(),
-            last_drawn_slider_position: 0.0,
+            last_drawn_slider_position: RefCell::new(0.0),
             seek_song_target: None,
 
             crop_start_point: None,
             crop_end_point: None,
-            crop_set_start_button_state: button::State::new(),
-            crop_jump_start_button_state: button::State::new(),
-            crop_set_end_button_state: button::State::new(),
-            crop_jump_end_button_state: button::State::new(),
-            crop_apply_button_state: button::State::new(),
         }
     }
 
@@ -135,14 +119,13 @@ impl CropView {
         Command::none()
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         Column::new()
             .padding(10)
             .spacing(10)
             .push(self.player.frame_view())
             .push(
                 Slider::new(
-                    &mut self.song_progress_slider_state,
                     0.0..=self.player.duration().as_millis() as f64,
                     {
                         if let Some((target, _)) = self.seek_song_target {
@@ -150,10 +133,10 @@ impl CropView {
                         } else {
                             let new_position = self.player.position().as_millis() as f64;
                             if new_position > 0.0 {
-                                self.last_drawn_slider_position = new_position;
+                                *self.last_drawn_slider_position.borrow_mut() = new_position;
                                 new_position
                             } else {
-                                self.last_drawn_slider_position
+                                *self.last_drawn_slider_position.borrow()
                             }
                         }
                     },
@@ -161,16 +144,16 @@ impl CropView {
                 )
                     .on_release(CropMessage::SeekSong.into())
             )
-            .push(Button::new(&mut self.play_button_state, Text::new(if self.player.paused() { "Play" } else { "Pause" }))
+            .push(Button::new(Text::new(if self.player.paused() { "Play" } else { "Pause" }))
                 .on_press(CropMessage::PlayPauseSong.into()))
             .push(
                 Row::new()
                     .padding(10)
                     .push(Text::new("Start point:"))
-                    .push(Button::new(&mut self.crop_set_start_button_state, Text::new("Set"))
+                    .push(Button::new(Text::new("Set"))
                         .on_press(CropMessage::SetStart.into()))
                     .push_if(self.crop_start_point.is_some(), ||
-                        Button::new(&mut self.crop_jump_start_button_state, Text::new("Jump"))
+                        Button::new(Text::new("Jump"))
                             .on_press(CropMessage::JumpStart.into()))
                     .push_if(self.crop_start_point.is_some(), ||
                         Text::new(format!("{}", self.crop_start_point.unwrap() / 1000.0)))
@@ -179,19 +162,19 @@ impl CropView {
                 Row::new()
                     .padding(10)
                     .push(Text::new("End point:"))
-                    .push(Button::new(&mut self.crop_set_end_button_state, Text::new("Set"))
+                    .push(Button::new(Text::new("Set"))
                         .on_press(CropMessage::SetEnd.into()))
                     .push_if(self.crop_end_point.is_some(), ||
-                        Button::new(&mut self.crop_jump_end_button_state, Text::new("Jump"))
+                        Button::new(Text::new("Jump"))
                             .on_press(CropMessage::JumpEnd.into()))
                     .push_if(self.crop_end_point.is_some(), ||
                         Text::new(format!("{}", self.crop_end_point.unwrap() / 1000.0)))
             )
             .push_if(
                 self.crop_start_point.is_some() && self.crop_end_point.is_some(),
-                || Button::new(&mut self.crop_apply_button_state, Text::new("Apply and save"))
+                || Button::new(Text::new("Apply and save"))
                     .on_press(CropMessage::ApplyCrop.into()))
-            .push(Button::new(&mut self.exit_button_state, Text::new("Cancel"))
+            .push(Button::new(Text::new("Cancel"))
                 .on_press(ContentMessage::OpenSongList.into()))
             .into()
     }

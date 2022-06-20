@@ -1,6 +1,6 @@
 use std::future::ready;
 
-use iced::{text_input, button, Command, Element, Column, TextInput, Button, Text};
+use iced::{Command, pure::{widget::{TextInput, Button, Column, Text}, Element}};
 
 use crate::{library::Song, Message};
 
@@ -20,22 +20,11 @@ impl From<EditMetadataMessage> for Message {
 
 pub struct EditMetadataView {
     song: Song,
-
-    title_text_input: text_input::State,
-    artist_text_input: text_input::State,
-    album_text_input: text_input::State,
-    apply_button_state: button::State,
 }
 
 impl EditMetadataView {
     pub fn new(song: Song) -> Self {
-        Self {
-            song,
-            title_text_input: text_input::State::new(),
-            artist_text_input: text_input::State::new(),
-            album_text_input: text_input::State::new(),
-            apply_button_state: button::State::new(),
-        }
+        Self { song }
     }
 
     pub fn update(&mut self, message: EditMetadataMessage) -> Command<Message> {
@@ -53,14 +42,14 @@ impl EditMetadataView {
         Command::none()
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         Column::new()
             .padding(10)
             .spacing(10)
-            .push(TextInput::new(&mut self.title_text_input, "", &self.song.metadata.title, |v| EditMetadataMessage::TitleChange(v).into()))
-            .push(TextInput::new(&mut self.artist_text_input, "", &self.song.metadata.artist, |v| EditMetadataMessage::ArtistChange(v).into()))
-            .push(TextInput::new(&mut self.album_text_input, "", &self.song.metadata.album, |v| EditMetadataMessage::AlbumChange(v).into()))
-            .push(Button::new(&mut self.apply_button_state, Text::new("Apply and save"))
+            .push(TextInput::new("", &self.song.metadata.title, |v| EditMetadataMessage::TitleChange(v).into()))
+            .push(TextInput::new("", &self.song.metadata.artist, |v| EditMetadataMessage::ArtistChange(v).into()))
+            .push(TextInput::new("", &self.song.metadata.album, |v| EditMetadataMessage::AlbumChange(v).into()))
+            .push(Button::new(Text::new("Apply and save"))
                 .on_press(EditMetadataMessage::ApplyMetadataEdit.into()))
             .into()
     }

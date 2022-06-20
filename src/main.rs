@@ -3,9 +3,9 @@
 
 use std::{sync::{Arc, RwLock}};
 
-use iced::{Column, Element, Settings, Application, executor, Command, Subscription};
+use iced::{pure::{Element, widget::Column, Application}, Settings, executor, Command, Subscription};
 use library::Library;
-use views::{download::{DownloadMessage, DownloadView}, song_list::{SongListMessage, SongListView}, content::{ContentMessage, ContentView}};
+use views::{download::{DownloadMessage, DownloadView}, content::{ContentMessage, ContentView}};
 
 mod youtube;
 mod library;
@@ -69,7 +69,7 @@ impl Application for MainView {
         Command::none()
     }
 
-    fn view(&mut self) -> Element<'_, Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         Column::new()
             .push(self.download_view.view())
             .push(self.content_view.view())

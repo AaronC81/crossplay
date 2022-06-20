@@ -1,6 +1,6 @@
 use std::{sync::{Arc, RwLock}, future::ready};
 
-use iced::{Column, Text, Element, Command, Button, button, Rule};
+use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule}}};
 use crate::{library::{Library, Song}, Message, ui_util::ElementContainerExtensions};
 
 use super::content::ContentMessage;
@@ -17,7 +17,6 @@ impl From<SongListMessage> for Message {
 
 pub struct SongListView {
     library: Arc<RwLock<Library>>,
-    refresh_button: button::State,
     song_views: Vec<(Song, SongView)>,
 }
 
@@ -26,18 +25,14 @@ impl SongListView {
         let mut song_views = vec![];
         Self::rebuild_song_views(library.clone(), &mut song_views);
         
-        Self {
-            library,
-            refresh_button: button::State::new(),
-            song_views,
-        }
+        Self { library, song_views }
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         Column::new()
             .push(Column::with_children(
-                self.song_views.iter_mut().map(|x| Some(x)).intersperse_with(|| None).map(|view|
-                    if let Some((song, view)) = view {
+                self.song_views.iter().map(|x| Some(x)).intersperse_with(|| None).map(|view|
+                    if let Some((_, view)) = view {
                         view.view().into()
                     } else {
                         Rule::horizontal(10).into()
@@ -45,7 +40,7 @@ impl SongListView {
                 ).collect()
             ))
             .push(
-                Button::new(&mut self.refresh_button, Text::new("Reload song list"))
+                Button::new(Text::new("Reload song list"))
                     .on_press(SongListMessage::RefreshSongList.into())
             )
             .into()
@@ -80,9 +75,6 @@ impl SongListView {
 struct SongView {
     library: Arc<RwLock<Library>>,
     song: Song,
-    edit_button_state: button::State,
-    crop_button_state: button::State,
-    restore_original_state: button::State,
 }
 
 impl SongView {
@@ -90,22 +82,19 @@ impl SongView {
         Self {
             library,
             song,
-            edit_button_state: button::State::new(),
-            crop_button_state: button::State::new(),
-            restore_original_state: button::State::new(),
         }
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         Column::new()
             .push(Text::new(self.song.metadata.title.clone()))
             .push_if(self.song.metadata.is_cropped || self.song.metadata.is_metadata_edited, ||
-                Button::new(&mut self.restore_original_state, Text::new("Restore original"))
+                Button::new(Text::new("Restore original"))
                     .on_press(SongListMessage::RestoreOriginal(self.song.clone()).into()))
-            .push(Button::new(&mut self.edit_button_state, Text::new("Edit metadata"))
+            .push(Button::new(Text::new("Edit metadata"))
                 .on_press(ContentMessage::OpenEditMetadata(self.song.clone()).into()))
             .push_if(!self.song.metadata.is_cropped, ||
-                Button::new(&mut self.crop_button_state, Text::new("Crop"))
+                Button::new(Text::new("Crop"))
                     .on_press(ContentMessage::OpenCrop(self.song.clone()).into()))
             .padding(10)
             .into()

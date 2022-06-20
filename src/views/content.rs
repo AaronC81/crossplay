@@ -1,6 +1,6 @@
 use std::sync::{RwLock, Arc};
 
-use iced::{Element, Subscription, Command};
+use iced::{pure::Element, Subscription, Command};
 
 use crate::{library::{Song, Library}, Message};
 
@@ -40,11 +40,11 @@ impl ContentView {
         }
     }
 
-    pub fn view(&mut self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         match self.state {
-            ContentViewState::SongList(ref mut v) => v.view(),
-            ContentViewState::Crop(ref mut v) => v.view(),
-            ContentViewState::EditMetadata(ref mut v) => v.view(),
+            ContentViewState::SongList(ref v) => v.view(),
+            ContentViewState::Crop(ref v) => v.view(),
+            ContentViewState::EditMetadata(ref v) => v.view(),
         }
     }
 

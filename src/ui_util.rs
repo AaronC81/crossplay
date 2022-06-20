@@ -1,4 +1,4 @@
-use iced::{Element, Row, Column, container};
+use iced::{pure::{Element, widget::{Row, Column}}, container};
 
 pub(crate) trait ElementContainerExtensions<'a, Message> where Self: Sized {
     fn push(self, child: impl Into<Element<'a, Message>>) -> Self;
