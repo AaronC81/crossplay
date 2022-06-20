@@ -42,10 +42,11 @@ impl Library {
                         let metadata = SongMetadata {
                             title: tag.title().unwrap_or("Unknown Title").into(),
                             artist: tag.artist().unwrap_or("Unknown Artist").into(),
-                            album: tag.artist().unwrap_or("Unknown Album").into(),
+                            album: tag.album().unwrap_or("Unknown Album").into(),
                             youtube_id: video_id.text.into(),
-                            album_art: SongMetadata::get_album_art(&tag), // TODO
+                            album_art: SongMetadata::get_album_art(&tag),
                             is_cropped: SongMetadata::get_cropped(&tag),
+                            is_metadata_edited: SongMetadata::get_metadata_edited(&tag),
                         };
 
                         self.loaded_songs.push(Song::new(path, metadata));
@@ -119,6 +120,15 @@ impl Song {
 
         Ok(())
     }
+
+    pub fn user_edit_metadata(&mut self) -> Result<(), LibraryError> {
+        self.create_original_copy()?;
+
+        self.metadata.is_metadata_edited = true;
+        self.metadata.write_into_file(&self.path)?;
+
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -130,10 +140,12 @@ pub struct SongMetadata {
     pub album_art: Option<Picture>,
 
     pub is_cropped: bool,
+    pub is_metadata_edited: bool,
 }
 
 const TAG_KEY_YOUTUBE_ID: &str = "[CrossPlay] YouTube ID";
 const TAG_KEY_IS_CROPPED: &str = "[CrossPlay] Cropped";
+const TAG_KEY_IS_METADATA_EDITED: &str = "[CrossPlay] Metadata edited";
 
 impl SongMetadata {
     fn get_youtube_id(tag: &Tag) -> Option<Comment> {
@@ -157,10 +169,22 @@ impl SongMetadata {
         tag.comments().find(|c| { c.description == TAG_KEY_IS_CROPPED }).is_some()
     }
 
-    fn mark_cropped(&self, tag: &mut Tag) {
+    fn mark_cropped(tag: &mut Tag) {
         tag.add_frame(Comment {
             lang: "eng".into(),
             description: TAG_KEY_IS_CROPPED.into(),
+            text: "".into(),
+        });
+    }
+
+    fn get_metadata_edited(tag: &Tag) -> bool {
+        tag.comments().find(|c| { c.description == TAG_KEY_IS_METADATA_EDITED }).is_some()
+    }
+
+    fn mark_metadata_edited(tag: &mut Tag) {
+        tag.add_frame(Comment {
+            lang: "eng".into(),
+            description: TAG_KEY_IS_METADATA_EDITED.into(),
             text: "".into(),
         });
     }
@@ -188,9 +212,8 @@ impl SongMetadata {
         }
         self.set_youtube_id(tag);
 
-        if self.is_cropped {
-            self.mark_cropped(tag);
-        }
+        if self.is_cropped { Self::mark_cropped(tag); }
+        if self.is_metadata_edited { Self::mark_metadata_edited(tag); }
     }
 
     pub(crate) fn write_into_file(&self, file: &Path) -> Result<(), LibraryError> {

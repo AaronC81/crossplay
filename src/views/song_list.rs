@@ -1,6 +1,6 @@
 use std::{sync::{Arc, RwLock}, time::Duration, future::ready};
 
-use iced::{Column, Text, Element, Command, Button, button, Rule, Subscription, slider, Slider, Row};
+use iced::{Column, Text, Element, Command, Button, button, Rule, Subscription, slider, Slider, Row, text_input, TextInput};
 use iced_futures::backend::default::time;
 use iced_video_player::{VideoPlayer, VideoPlayerMessage};
 use crate::{library::{Library, Song}, Message, ui_util::ElementContainerExtensions};
@@ -11,7 +11,8 @@ pub enum SongListMessage {
     RefreshSongList,
 
     EnterCropMode(Song),
-    ExitCropMode,
+    EnterNormalMode,
+    EnterEditMode(Song),
 
     PlayPauseSong,
     SetSeekSongTarget(f64),
@@ -23,9 +24,15 @@ pub enum SongListMessage {
     SetEnd,
     JumpEnd,
     ApplyCrop,
-    DeleteCrop(Song),
 
+    RestoreOriginal(Song),
+    
     VideoPlayerMessage(VideoPlayerMessage),
+
+    TitleChange(String),
+    ArtistChange(String),
+    AlbumChange(String),
+    ApplyMetadataEdit,
 }
 
 impl From<SongListMessage> for Message {
@@ -54,7 +61,15 @@ enum SongListViewState {
         crop_set_end_button_state: button::State,
         crop_jump_end_button_state: button::State,
         crop_apply_button_state: button::State,
-    }
+    },
+    EditMode {
+        song: Song,
+
+        title_text_input: text_input::State,
+        artist_text_input: text_input::State,
+        album_text_input: text_input::State,
+        apply_button_state: button::State,
+    },
 }
 
 pub struct SongListView {
@@ -169,9 +184,25 @@ impl SongListView {
                         || Button::new(crop_apply_button_state, Text::new("Apply and save"))
                             .on_press(SongListMessage::ApplyCrop.into()))
                     .push(Button::new(exit_button_state, Text::new("Cancel"))
-                        .on_press(SongListMessage::ExitCropMode.into()))
+                        .on_press(SongListMessage::EnterNormalMode.into()))
                     .into(),
 
+            SongListViewState::EditMode {
+                song,
+                title_text_input,
+                artist_text_input,
+                album_text_input,
+                apply_button_state,
+            } =>
+                Column::new()
+                    .padding(10)
+                    .spacing(10)
+                    .push(TextInput::new(title_text_input, "", &song.metadata.title, |v| SongListMessage::TitleChange(v).into()))
+                    .push(TextInput::new(artist_text_input, "", &song.metadata.artist, |v| SongListMessage::ArtistChange(v).into()))
+                    .push(TextInput::new(album_text_input, "", &song.metadata.album, |v| SongListMessage::AlbumChange(v).into()))
+                    .push(Button::new(apply_button_state, Text::new("Apply and save"))
+                        .on_press(SongListMessage::ApplyMetadataEdit.into()))
+                    .into()
         }
 
     }
@@ -222,7 +253,7 @@ impl SongListView {
                 }
             },
 
-            SongListMessage::ExitCropMode => {
+            SongListMessage::EnterNormalMode => {
                 self.library.write().unwrap().load_songs().unwrap();
 
                 let mut song_views = vec![];
@@ -233,6 +264,17 @@ impl SongListView {
                     song_views,
                 };
             }
+
+            SongListMessage::EnterEditMode(song) => {
+                self.state = SongListViewState::EditMode {
+                    song,
+
+                    title_text_input: text_input::State::new(),
+                    artist_text_input: text_input::State::new(),
+                    album_text_input: text_input::State::new(),
+                    apply_button_state: button::State::new(),
+                }
+            },
 
             SongListMessage::PlayPauseSong => {
                 if let SongListViewState::CropMode { player, .. } = &mut self.state {
@@ -300,11 +342,11 @@ impl SongListView {
             SongListMessage::ApplyCrop => {
                 if let SongListViewState::CropMode { song, crop_start_point, crop_end_point, .. } = &mut self.state {
                     song.crop(Duration::from_secs_f64(crop_start_point.unwrap() / 1000.0), Duration::from_secs_f64(crop_end_point.unwrap() / 1000.0)).unwrap();
-                    return Command::perform(ready(()), |_| SongListMessage::ExitCropMode.into())
+                    return Command::perform(ready(()), |_| SongListMessage::EnterNormalMode.into())
                 }
             }
 
-            SongListMessage::DeleteCrop(song) => {
+            SongListMessage::RestoreOriginal(song) => {
                 // TODO: will undo other modifications too, if/when we have those
                 song.restore_original_copy().unwrap();
                 return Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
@@ -313,6 +355,31 @@ impl SongListView {
             SongListMessage::VideoPlayerMessage(msg) => {
                 if let SongListViewState::CropMode { player, .. } = &mut self.state {
                     return player.update(msg).map(|m| SongListMessage::VideoPlayerMessage(m).into());
+                }
+            }
+
+            SongListMessage::TitleChange(v) => {
+                if let SongListViewState::EditMode { song, .. } = &mut self.state {
+                    song.metadata.title = v;
+                }
+            }
+
+            SongListMessage::ArtistChange(v) => {
+                if let SongListViewState::EditMode { song, .. } = &mut self.state {
+                    song.metadata.artist = v;
+                }
+            }
+
+            SongListMessage::AlbumChange(v) => {
+                if let SongListViewState::EditMode { song, .. } = &mut self.state {
+                    song.metadata.album = v;
+                }
+            }
+
+            SongListMessage::ApplyMetadataEdit => {
+                if let SongListViewState::EditMode { song, .. } = &mut self.state {
+                    song.user_edit_metadata().unwrap();
+                    return Command::perform(ready(()), |_| SongListMessage::EnterNormalMode.into())
                 }
             }
         }
@@ -335,8 +402,9 @@ impl SongListView {
 struct SongView {
     library: Arc<RwLock<Library>>,
     song: Song,
-    delete_crop_button_state: button::State,
+    edit_button_state: button::State,
     crop_button_state: button::State,
+    restore_original_state: button::State,
 }
 
 impl SongView {
@@ -344,17 +412,20 @@ impl SongView {
         Self {
             library,
             song,
+            edit_button_state: button::State::new(),
             crop_button_state: button::State::new(),
-            delete_crop_button_state: button::State::new(),
+            restore_original_state: button::State::new(),
         }
     }
 
     pub fn view(&mut self) -> Element<Message> {
         Column::new()
             .push(Text::new(self.song.metadata.title.clone()))
-            .push_if(self.song.metadata.is_cropped, ||
-                Button::new(&mut self.delete_crop_button_state, Text::new("Delete crop"))
-                    .on_press(SongListMessage::DeleteCrop(self.song.clone()).into()))
+            .push_if(self.song.metadata.is_cropped || self.song.metadata.is_metadata_edited, ||
+                Button::new(&mut self.restore_original_state, Text::new("Restore original"))
+                    .on_press(SongListMessage::RestoreOriginal(self.song.clone()).into()))
+            .push(Button::new(&mut self.edit_button_state, Text::new("Edit metadata"))
+                .on_press(SongListMessage::EnterEditMode(self.song.clone()).into()))
             .push_if(!self.song.metadata.is_cropped, ||
                 Button::new(&mut self.crop_button_state, Text::new("Crop"))
                     .on_press(SongListMessage::EnterCropMode(self.song.clone()).into()))
