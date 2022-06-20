@@ -1,4 +1,4 @@
-use std::{sync::Arc, ops::Deref, io::Cursor, path::{PathBuf, Path}};
+use std::{sync::Arc, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File};
 
 use async_process::{Command, Output};
 use id3::frame::Picture;
@@ -67,40 +67,38 @@ impl YouTubeDownload {
         }
 
         // We should've downloaded a thumbnail too, figure out where that is
-        let thumbnail_possible_extensions = [
-            ("jpg", "image/jpeg"),
-            ("jpeg", "image/jpeg"),
-            ("webp", "image/webp"),
-            ("png", "image/png"),
-        ];
-        let (thumbnail_path, mut thumbnail_mime) = thumbnail_possible_extensions
+        let thumbnail_possible_extensions = ["jpg", "jpeg", "webp", "png"];
+        let thumbnail_path = thumbnail_possible_extensions
             .iter()
-            .find_map(|(ext, mime)| {
+            .find_map(|ext| {
                 let path = library_path.join(format!("{}.{}", self.id, ext));
                 if path.exists() {
-                    Some((path, mime))
+                    Some(path)
                 } else {
                     None
                 }
             })
             .ok_or(DownloadError::ThumbnailMissing)?;
 
-        // If this image is a WEBP, then convert it into a JPEG instead, since music players don't
-        // tend to understand WEBP
-        let thumbnail_data = 
-            if thumbnail_mime == &"image/webp" {
-                thumbnail_mime = &"image/jpeg";
-                let loaded_webp = image::open(thumbnail_path.clone()).map_err(|e| DownloadError::ImageError(Arc::new(e)))?;
-                let mut jpeg_bytes = Cursor::new(vec![]);
-                loaded_webp.write_to(&mut jpeg_bytes, ImageFormat::Jpeg).map_err(|e| DownloadError::ImageError(Arc::new(e)))?;
-                jpeg_bytes.into_inner()
-            } else {
-                std::fs::read(thumbnail_path.clone()).map_err(|e| DownloadError::IoError(Arc::new(e)))?
-            };
+        // Convert to JPEG
+        // Originally, this tried to be clever and only convert if the image was a WEBP - but
+        // YouTube sometimes lies and sends us WEBPs with a .jpg extension
+        // https://github.com/ytdl-org/youtube-dl/issues/29754 
+        // Using image::io::Reader rather than image::open lets us use `with_guessed_format`, which
+        // guesses using content instead of path, circumventing this
+        let reader = BufReader::new(File::open(&thumbnail_path).map_err(|e| DownloadError::IoError(Arc::new(e)))?);
+        let loaded_file = image::io::Reader::new(reader)
+            .with_guessed_format()
+            .map_err(|e| DownloadError::IoError(Arc::new(e)))?
+            .decode()
+            .map_err(|e| DownloadError::ImageError(Arc::new(e)))?;
+        let mut jpeg_bytes = Cursor::new(vec![]);
+        loaded_file.write_to(&mut jpeg_bytes, ImageFormat::Jpeg).map_err(|e| DownloadError::ImageError(Arc::new(e)))?;
+        let thumbnail_data = jpeg_bytes.into_inner();
 
         // Convert thumbnail into an ID3 picture
         let thumbnail_picture = Picture {
-            mime_type: thumbnail_mime.to_string(),
+            mime_type: "image/jpeg".to_string(),
             picture_type: id3::frame::PictureType::CoverFront,
             description: "Cover".to_string(),
             data: thumbnail_data,
