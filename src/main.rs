@@ -4,7 +4,9 @@
 use std::{sync::{Arc, RwLock}};
 
 use iced::{pure::{Element, widget::Column, Application}, Settings, executor, Command, Subscription};
+use iced_native::{subscription, window, Event};
 use library::Library;
+use native_dialog::{MessageDialog, MessageType};
 use views::{download::{DownloadMessage, DownloadView}, content::{ContentMessage, ContentView}};
 
 mod youtube;
@@ -13,12 +15,16 @@ mod views;
 mod ui_util;
 
 fn main() {
-    MainView::run(Settings::with_flags(())).unwrap();
+    let mut settings = Settings::with_flags(());
+    settings.exit_on_close_request = false;
+
+    MainView::run(settings).unwrap();
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     None,
+    Close,
     DownloadMessage(DownloadMessage),
     ContentMessage(ContentMessage),
 }
@@ -56,12 +62,39 @@ impl Application for MainView {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        self.content_view.subscription()
+        Subscription::batch([
+            self.content_view.subscription(),
+            subscription::events().map(|e| {
+                if let Event::Window(window::Event::CloseRequested) = e {
+                    Message::Close
+                } else {
+                    Message::None
+                }
+            }),
+        ])
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {         
         match message {
             Message::None => (),
+            Message::Close => {
+                if self.download_view.downloads_in_progress.is_empty() {
+                    std::process::exit(0);
+                } else {
+                    let confirmation = MessageDialog::new()
+                        .set_title("Cancel downloads?")
+                        .set_text(
+                            "There are currently downloads in progress. Exiting now will cancel them. Are you sure you would like to exit?",
+                        )
+                        .set_type(MessageType::Warning)
+                        .show_confirm()
+                        .unwrap();
+
+                    if confirmation {
+                        std::process::exit(0);
+                    }
+                }
+            },
             Message::ContentMessage(cm) => return self.content_view.update(cm),
             Message::DownloadMessage(dm) => return self.download_view.update(dm),
         }

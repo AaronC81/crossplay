@@ -529,6 +529,7 @@ dependencies = [
  "gstreamer 0.18.8",
  "iced",
  "iced_futures",
+ "iced_native",
  "iced_video_player",
  "id3",
  "image 0.24.2",

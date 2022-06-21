@@ -21,7 +21,7 @@ pub struct DownloadView {
     id_input: String,
     status_showing: bool,
 
-    downloads_in_progress: Vec<YouTubeDownload>,
+    pub downloads_in_progress: Vec<YouTubeDownload>,
     download_errors: Vec<(YouTubeDownload, DownloadError)>,
     any_download_occurred: bool,
 }

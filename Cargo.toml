@@ -19,3 +19,4 @@ iced_video_player = { git = "https://github.com/AaronC81/iced_video_player" }
 url = "2.2.2"
 gstreamer = "0.18.8"
 native-dialog = "0.6.3"
+iced_native = "0.5.1"
