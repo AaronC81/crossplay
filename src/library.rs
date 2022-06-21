@@ -2,28 +2,49 @@ use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::Duration
 
 use id3::{Tag, TagLike, frame::{Comment, Picture, PictureType}};
 
+/// A collection of songs, managed by CrossPlay, saved to a particular location.
+/// 
+/// To avoid extraneous I/O calls, each library instance stores a [`Vec`] of loaded songs. Care must
+/// be taken to reload this whenever necessary so that the application is not acting on a stale
+/// state.
 #[derive(Debug)]
 pub struct Library {
     pub path: PathBuf,
     loaded_songs: Vec<Song>,
 }
 
+/// An error which may occur when performing library management tasks.
 #[derive(Debug, Clone)]
 pub enum LibraryError {
+    /// An invocation of ffmpeg did not complete successfully.
     FfmpegNonZeroExit(Output),
+    
+    /// An I/O error occurred.
     IoError(Arc<std::io::Error>),
+
+    /// An error occurred while reading or writing an MP3 file's ID3 tags.
     TagError(Arc<id3::Error>),
 }
 
 impl Library {
+    /// Creates a new reference to a library on-disk.
     pub fn new(path: PathBuf) -> Self {
         Self { path, loaded_songs: vec![] }
     }
     
+    /// Iterates over all loaded songs.
+    /// 
+    /// You must call [`load_songs`] before this.
     pub fn songs(&self) -> impl Iterator<Item = &Song> {
         self.loaded_songs.iter()
     }
 
+    /// Reloads the list of songs in this library.
+    /// 
+    /// For a song to be loaded, it must:
+    ///   - Be in the root of the library folder
+    ///   - Be an MP3 file with a .mp3 extension
+    ///   - Have a CrossPlay video ID comment in its ID3 tags
     pub fn load_songs(&mut self) -> Result<(), LibraryError> {
         // Look for MP3 files at the root of the directory
         self.loaded_songs.clear();
@@ -59,21 +80,33 @@ impl Library {
     }
 }
 
+/// A song loaded from a library.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Song {
+    /// The path to the working copy of this song, possibly modified.
     pub path: PathBuf,
+
+    /// This song's metadata, loaded from ID3 tags.
     pub metadata: SongMetadata,
 }
 
 impl Song {
+    /// Creates a new reference to a song on-disk.
     fn new(path: PathBuf, metadata: SongMetadata) -> Self {
         Self { path, metadata }
     }
 
+    /// The path where the original of this song will be copied to, before any modifications take
+    /// place.
+    /// 
+    /// This will not exist if the song has not been modified (and thus [`create_original_copy`] has
+    /// not been called).
     fn original_copy_path(&self) -> PathBuf {
         format!("{}.original", self.path.to_string_lossy()).into()
     }
 
+    /// Creates an original copy of this song, if one does not already exist. It is the caller's
+    /// responsibility to ensure this is called before modifying the file at the song's [`path`].
     fn create_original_copy(&self) -> Result<(), LibraryError> {
         if self.original_copy_path().exists() { return Ok(()) }
         std::fs::copy(&self.path, self.original_copy_path()).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
@@ -81,16 +114,28 @@ impl Song {
         Ok(())
     }
 
+    /// Restores the original copy of this song, replacing the working copy. The original copy is
+    /// left intact.
+    /// 
+    /// Errors if an original does not exist.
     pub fn restore_original_copy(&self) -> Result<(), LibraryError> {
         std::fs::copy(self.original_copy_path(), &self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
 
         Ok(())
     }
 
+    /// Returns true if this song's metadata indicates that it has been modified from the original.
     pub fn is_modified(&self) -> bool {
         self.metadata.is_cropped || self.metadata.is_metadata_edited
     }
 
+    /// Modifies the working copy of this song to start and end at the selected points. This is
+    /// accomplished by shelling out to ffmpeg.
+    /// 
+    /// Also sets the [`SongMetadata.is_cropped`] flag to true, and re-writes metadata to the
+    /// working copy.
+    /// 
+    /// This will create an original copy first, if one does not already exist.
     pub fn crop(&mut self, start: Duration, end: Duration) -> Result<(), LibraryError> {
         self.create_original_copy()?;
 
@@ -125,6 +170,10 @@ impl Song {
         Ok(())
     }
 
+    /// Modifies the working copy of this song to update its metadata to the current value of
+    /// [`self.metadata`], as well as setting the [`SongMetadata.is_metadata_edited`] flag to true.
+    /// 
+    /// This will create an original copy first, if one does not already exist.
     pub fn user_edit_metadata(&mut self) -> Result<(), LibraryError> {
         self.create_original_copy()?;
 
@@ -134,6 +183,7 @@ impl Song {
         Ok(())
     }
 
+    /// Deletes all copies of this song (working and original) from the library folder on disk.
     pub fn delete(&mut self) -> Result<(), LibraryError> {
         if self.original_copy_path().exists() {
             std::fs::remove_file(self.original_copy_path()).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
