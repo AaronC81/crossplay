@@ -1,7 +1,7 @@
 use std::{sync::{Arc, RwLock}, future::ready, time::Duration};
 
 use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container}}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time};
-use crate::{youtube::{YouTubeDownload, DownloadError, YouTubeDownloadProgress}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
+use crate::{youtube::{YouTubeDownload, DownloadError, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
 use super::song_list::SongListMessage;
 
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ impl DownloadView {
                         .height(Length::Units(60))
                         .push(
                             TextInput::new(
-                                "Paste a YouTube video ID...", 
+                                "Paste a YouTube link...", 
                                 &self.id_input, 
                                 |s| DownloadMessage::IdInputChange(s).into(),
                             )
@@ -154,7 +154,8 @@ impl DownloadView {
                 self.any_download_occurred = true;
 
                 // Need two named copies for the two closures
-                let async_dl = YouTubeDownload::new(self.id_input.clone());
+                let id = extract_video_id(&self.id_input);
+                let async_dl = YouTubeDownload::new(id);
                 let result_dl = async_dl.clone();
                 let progress = Arc::new(RwLock::new(YouTubeDownloadProgress::new()));
                 self.downloads_in_progress.push((result_dl.clone(), progress.clone()));
