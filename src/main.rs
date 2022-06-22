@@ -64,6 +64,7 @@ impl Application for MainView {
     fn subscription(&self) -> Subscription<Self::Message> {
         Subscription::batch([
             self.content_view.subscription(),
+            self.download_view.subscription(),
             subscription::events().map(|e| {
                 if let Event::Window(window::Event::CloseRequested) = e {
                     Message::Close

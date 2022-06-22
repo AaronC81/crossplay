@@ -1,9 +1,11 @@
-use std::{sync::Arc, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File};
+use std::{sync::{Arc, RwLock}, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File};
 
-use async_process::{Command, Output};
+use async_process::{Command, Output, Stdio, ExitStatus};
 use id3::frame::Picture;
 use image::{ImageBuffer, ImageError, ImageFormat};
+use regex::Regex;
 use serde_json::Value;
+use iced::futures::{io::BufReader as AsyncBufReader, AsyncBufReadExt, StreamExt};
 
 use crate::library::{Library, SongMetadata, LibraryError};
 
@@ -12,10 +14,21 @@ pub struct YouTubeDownload {
     pub id: String,
 }
 
+pub struct YouTubeDownloadProgress {
+    pub progress: f32,
+    pub metadata: Option<SongMetadata>,
+}
+
+impl YouTubeDownloadProgress {
+    pub fn new() -> Self {
+        Self { progress: 0.0, metadata: None }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum DownloadError {
     IoError(Arc<std::io::Error>),
-    YouTubeDLNonZeroExit(Output),
+    YouTubeDLNonZeroExit(ExitStatus),
     DownloadMissing,
     ThumbnailMissing,
     LibraryError(LibraryError),
@@ -31,30 +44,99 @@ impl YouTubeDownload {
         format!("https://youtube.com/watch?v={}", self.id)
     }
 
-    pub async fn download(&self, library_path: &Path) -> Result<(), DownloadError> {
+    pub async fn download(&self, library_path: &Path, progress: Arc<RwLock<YouTubeDownloadProgress>>) -> Result<(), DownloadError> {
         println!("[Download] Starting...");
+
+        // Set up initial progress, just in case we were passed a dirty object
+        // Note: The blocks dispersed throughout this function around usages of `progress`, like
+        // this one, are to stop the compiler getting angry about passing RwLocks across thread
+        // boundaries (even though we aren't because of `drop`s)
+        {
+            let mut progress_writer = progress.write().unwrap();
+            *progress_writer = YouTubeDownloadProgress::new();
+            drop(progress_writer);
+        }
 
         let download_path = library_path.join(format!("{}.%(ext)s", self.id));
         
         // Ask youtube-dl to download this video
-        let output = Command::new("youtube-dl")
-            .arg("--print-json")
+        let mut process = Command::new("youtube-dl")
+            .arg("--write-info-json")
             .arg("--extract-audio")
             .arg("--write-thumbnail")
+            .arg("--newline")
             .arg("--audio-format")
             .arg("mp3")
             .arg("--output")
             .arg(download_path.clone())
             .arg(self.url())
-            .output()
-            .await
+            .stdout(Stdio::piped())
+            .spawn()
             .map_err(|e| DownloadError::IoError(Arc::new(e)))?;
 
-        println!("[Download] Command complete");
+        let mut line_reader = AsyncBufReader::new(process.stdout.take().unwrap()).lines();
+        let json_file_regex = Regex::new("Writing video description metadata as JSON to: (.+)$").unwrap();
+        let progress_regex = Regex::new(r"\[download\]\s*(\d+\.\d+)%").unwrap();
+        while let Some(line) = line_reader.next().await {
+            let line = line.map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+
+            // Look for the line which tells us where our metadata file is
+            if let Some(captures) = json_file_regex.captures(&line) {
+                // youtube-dl says it written the file, but that's not a guarantee, sometimes it
+                // can take a little while (presumably due to disk flusing)
+                // Wait for it to exist
+                // TODO: delay between checks, maybe with timeout
+                let json_file = captures.get(1).unwrap().as_str();
+                while !PathBuf::from(json_file).exists() {}
+
+                let contents = std::fs::read_to_string(json_file).map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+                
+                // Convert into metadata
+                {
+                    let mut progress_writer = progress.write().unwrap();
+                    progress_writer.metadata = Self::youtube_dl_output_to_metadata(contents);
+                    drop(progress_writer);
+                }
+
+                // Delete file - we've got what we need
+                std::fs::remove_file(json_file).map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+            }
+
+            // Also look for progress updates
+            if let Some(captures) = progress_regex.captures(&line) {
+                let percentage = captures.get(1).unwrap().as_str();
+
+                {
+                    let mut progress_writer = progress.write().unwrap();
+                    progress_writer.progress = percentage.parse().unwrap();
+                    drop(progress_writer);
+                }
+            }
+        }
+
+        // If we never got any metadata, initialise it
+        let mut metadata;
+        {
+            let progress_reader = progress.read().unwrap();
+            metadata = progress_reader.metadata.clone().unwrap_or_else(||
+                SongMetadata {
+                    title: self.id.clone(),
+                    artist: "Unknown Artist".into(),
+                    album: "Unknown Album".into(),
+                    youtube_id: self.id.clone(),
+                    album_art: None,
+                    is_cropped: false,
+                    is_metadata_edited: false,
+                }
+            );
+            drop(progress_reader);
+            drop(progress);
+        }
 
         // Check success
-        if !output.status.success() {
-            return Err(DownloadError::YouTubeDLNonZeroExit(output))
+        let status = process.status().await.map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+        if !status.success() {
+            return Err(DownloadError::YouTubeDLNonZeroExit(status))
         }
 
         println!("[Download] Command has zero exit status");
@@ -107,17 +189,8 @@ impl YouTubeDownload {
         // Delete thumbnail file, since it's now encoded into ID3
         std::fs::remove_file(thumbnail_path).map_err(|e| DownloadError::IoError(Arc::new(e)))?;
             
-        // Build up metadata
-        let metadata = Self::youtube_dl_output_to_metadata(output, thumbnail_picture)
-            .unwrap_or(SongMetadata {
-                title: self.id.clone(),
-                artist: "Unknown Artist".into(),
-                album: "Unknown Album".into(),
-                youtube_id: self.id.clone(),
-                album_art: None,
-                is_cropped: false,
-                is_metadata_edited: false,
-            });
+        // Assign thumbnail
+        metadata.album_art = Some(thumbnail_picture); 
 
         println!("[Download] Build metadata object");
 
@@ -129,17 +202,15 @@ impl YouTubeDownload {
         Ok(())
     }
 
-    fn youtube_dl_output_to_metadata(output: Output, album_art: Picture) -> Option<SongMetadata> {
-        // First line of output is a JSON dump about the video (because we passed --print-json)
-        let stdout_str = String::from_utf8(output.stdout).ok()?;
-        let stdout_json: Value = serde_json::from_str(&stdout_str).ok()?;
+    fn youtube_dl_output_to_metadata(string: String) -> Option<SongMetadata> {
+        let stdout_json: Value = serde_json::from_str(&string).ok()?;
         
         Some(SongMetadata {
             title: stdout_json["title"].as_str()?.into(),
             artist: stdout_json["uploader"].as_str()?.into(),
             album: "Unknown Album".into(),
             youtube_id: stdout_json["id"].as_str()?.into(),
-            album_art: Some(album_art),
+            album_art: None,
             is_cropped: false,
             is_metadata_edited: false,
         })

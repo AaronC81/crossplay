@@ -1,7 +1,7 @@
-use std::{sync::{Arc, RwLock}, future::ready};
+use std::{sync::{Arc, RwLock}, future::ready, time::Duration};
 
-use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container}}, container, Background, Length, alignment::Vertical, Rule, Command};
-use crate::{youtube::{YouTubeDownload, DownloadError}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
+use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container}}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time};
+use crate::{youtube::{YouTubeDownload, DownloadError, YouTubeDownloadProgress}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
 use super::song_list::SongListMessage;
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub struct DownloadView {
     id_input: String,
     status_showing: bool,
 
-    pub downloads_in_progress: Vec<YouTubeDownload>,
+    pub downloads_in_progress: Vec<(YouTubeDownload, Arc<RwLock<YouTubeDownloadProgress>>)>,
     download_errors: Vec<(YouTubeDownload, DownloadError)>,
     any_download_occurred: bool,
 }
@@ -100,13 +100,30 @@ impl DownloadView {
             .push_if(self.status_showing, ||
                 Container::new(
                     Column::new()
-                        .push(
-                            Text::new(format!("{} download(s) in progress", self.downloads_in_progress.len()))
-                        )
-                        .push(
-                            Column::with_children(self.downloads_in_progress.iter().map(|dl| {
-                                Text::new(format!("ID {}", dl.id)).into()
+                        .push_if(!self.downloads_in_progress.is_empty(), ||
+                            Column::with_children(self.downloads_in_progress.iter().map(|(dl, prog)| {
+                                let prog = prog.read().unwrap();
+                                let text = if let Some(metadata) = &prog.metadata {
+                                    format!("{} (ID {})", metadata.title, dl.id)
+                                } else {
+                                    format!("Looking up video info... (ID {})", dl.id)
+                                };
+
+                                Row::new()
+                                    .align_items(iced::Alignment::Center)
+                                    .spacing(10)
+                                    .width(Length::Fill)
+                                    .push(
+                                        ProgressBar::new(0.0..=100.0, prog.progress)
+                                            .width(Length::FillPortion(2))
+                                    )
+                                    .push(Text::new(text).width(Length::FillPortion(3)))
+                                    .into()
                             }).collect())
+                                .spacing(10)
+                        )
+                        .push_if(self.downloads_in_progress.is_empty(), ||
+                            Text::new("No downloads in progress.")
                         )
                         .push(Rule::horizontal(10))
                         .push(
@@ -139,14 +156,15 @@ impl DownloadView {
                 // Need two named copies for the two closures
                 let async_dl = YouTubeDownload::new(self.id_input.clone());
                 let result_dl = async_dl.clone();
-                self.downloads_in_progress.push(result_dl.clone());
+                let progress = Arc::new(RwLock::new(YouTubeDownloadProgress::new()));
+                self.downloads_in_progress.push((result_dl.clone(), progress.clone()));
 
                 self.id_input = "".to_string();
                 
                 let library_path = self.library.read().unwrap().path.clone();
                 return Command::perform(
                     (async move || {
-                        async_dl.download(&library_path).await
+                        async_dl.download(&library_path, progress).await
                     })(),
                     move |r| DownloadMessage::DownloadComplete(result_dl.clone(), r).into()
                 )
@@ -154,7 +172,7 @@ impl DownloadView {
 
             DownloadMessage::DownloadComplete(dl, result) => {
                 // Remove the download which just finished
-                self.downloads_in_progress.retain(|this_dl| *this_dl != dl);
+                self.downloads_in_progress.retain(|(this_dl, _)| *this_dl != dl);
 
                 if let Err(e) = result {
                     self.download_errors.push((dl, e));
@@ -167,5 +185,15 @@ impl DownloadView {
         }
 
         Command::none()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        // If a download is in progress, poke the UI to refresh occasionally to keep metadata and
+        // progress up-to-date
+        if !self.downloads_in_progress.is_empty() {
+            time::every(Duration::from_millis(500)).map(|_| Message::None)
+        } else {
+            Subscription::none()
+        }
     }
 }
