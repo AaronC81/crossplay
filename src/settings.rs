@@ -1,8 +1,7 @@
-// TODO: handle errors properly in here!
-
 use std::path::PathBuf;
 
 use serde::{Serialize, Deserialize};
+use anyhow::Result;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Settings {
@@ -19,30 +18,32 @@ impl Settings {
     }
 
     /// Loads the application settings, or creates them from defaults if they do not exist.
-    pub fn load() -> Self {
+    pub fn load() -> Result<Self> {
         let path = Self::settings_path();
         if !path.exists() {
-            Settings::default().save();
+            Settings::default().save()?;
         }
 
-        let settings_contents = std::fs::read_to_string(path).expect("could not read settings");
-        serde_json::from_str(&settings_contents).expect("could not parse settings")
+        let settings_contents = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&settings_contents)?)
     }
 
     /// Saves the application settings.
-    pub fn save(&self) {
+    pub fn save(&self) -> Result<()> {
         // Ensure settings dir exists
         if !Self::settings_dir().exists() {
-            std::fs::create_dir(Self::settings_dir()).expect("could not create settings dir");
+            std::fs::create_dir(Self::settings_dir())?;
         }
 
         // Ensure library dir exists
         if !self.library_path.exists() {
-            std::fs::create_dir(&self.library_path).expect("could not create library dir");
+            std::fs::create_dir(&self.library_path)?;
         }
 
-        let json = serde_json::to_string(self).expect("could not serialize settings");
-        std::fs::write(Self::settings_path(), json).expect("could not write settings");
+        let json = serde_json::to_string(self)?;
+        std::fs::write(Self::settings_path(), json)?;
+
+        Ok(())
     }
 }
 

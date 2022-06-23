@@ -1,5 +1,6 @@
-use std::{sync::{Arc, RwLock}, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File};
+use std::{sync::{Arc, RwLock}, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File, error::Error, fmt::Display};
 
+use anyhow::{Result, anyhow};
 use async_process::{Command, Output, Stdio, ExitStatus};
 use id3::frame::Picture;
 use image::{ImageBuffer, ImageError, ImageFormat};
@@ -7,7 +8,7 @@ use regex::Regex;
 use serde_json::Value;
 use iced::futures::{io::BufReader as AsyncBufReader, AsyncBufReadExt, StreamExt};
 
-use crate::library::{Library, SongMetadata, LibraryError};
+use crate::library::{Library, SongMetadata};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct YouTubeDownload {
@@ -25,16 +26,6 @@ impl YouTubeDownloadProgress {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum DownloadError {
-    IoError(Arc<std::io::Error>),
-    YouTubeDLNonZeroExit(ExitStatus),
-    DownloadMissing,
-    ThumbnailMissing,
-    LibraryError(LibraryError),
-    ImageError(Arc<ImageError>),
-}
-
 impl YouTubeDownload {
     pub fn new(id: impl Into<String>) -> Self {
         Self { id: id.into() }
@@ -44,7 +35,7 @@ impl YouTubeDownload {
         format!("https://youtube.com/watch?v={}", self.id)
     }
 
-    pub async fn download(&self, library_path: &Path, progress: Arc<RwLock<YouTubeDownloadProgress>>) -> Result<(), DownloadError> {
+    pub async fn download(&self, library_path: &Path, progress: Arc<RwLock<YouTubeDownloadProgress>>) -> Result<()> {
         println!("[Download] Starting...");
 
         // Set up initial progress, just in case we were passed a dirty object
@@ -71,14 +62,13 @@ impl YouTubeDownload {
             .arg(download_path.clone())
             .arg(self.url())
             .stdout(Stdio::piped())
-            .spawn()
-            .map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+            .spawn()?;
 
         let mut line_reader = AsyncBufReader::new(process.stdout.take().unwrap()).lines();
         let json_file_regex = Regex::new("Writing video description metadata as JSON to: (.+)$").unwrap();
         let progress_regex = Regex::new(r"\[download\]\s*(\d+\.\d+)%").unwrap();
         while let Some(line) = line_reader.next().await {
-            let line = line.map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+            let line = line?;
 
             // Look for the line which tells us where our metadata file is
             if let Some(captures) = json_file_regex.captures(&line) {
@@ -89,7 +79,7 @@ impl YouTubeDownload {
                 let json_file = captures.get(1).unwrap().as_str();
                 while !PathBuf::from(json_file).exists() {}
 
-                let contents = std::fs::read_to_string(json_file).map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+                let contents = std::fs::read_to_string(json_file)?;
                 
                 // Convert into metadata
                 {
@@ -99,7 +89,7 @@ impl YouTubeDownload {
                 }
 
                 // Delete file - we've got what we need
-                std::fs::remove_file(json_file).map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+                std::fs::remove_file(json_file)?;
             }
 
             // Also look for progress updates
@@ -134,10 +124,8 @@ impl YouTubeDownload {
         }
 
         // Check success
-        let status = process.status().await.map_err(|e| DownloadError::IoError(Arc::new(e)))?;
-        if !status.success() {
-            return Err(DownloadError::YouTubeDLNonZeroExit(status))
-        }
+        let status = process.status().await?;
+        status.exit_ok()?;
 
         println!("[Download] Command has zero exit status");
 
@@ -145,7 +133,7 @@ impl YouTubeDownload {
         // an unknown extension. Make sure we actually downloaded an MP3
         let download_path = library_path.join(format!("{}.mp3", self.id));
         if !download_path.exists() {
-            return Err(DownloadError::DownloadMissing)
+            return Err(anyhow!("Downloaded MP3 could not be located."));
         }
 
         // We should've downloaded a thumbnail too, figure out where that is
@@ -160,7 +148,7 @@ impl YouTubeDownload {
                     None
                 }
             })
-            .ok_or(DownloadError::ThumbnailMissing)?;
+            .ok_or(anyhow!("Downloaded thumbnail could not be located."))?;
 
         // Convert to JPEG
         // Originally, this tried to be clever and only convert if the image was a WEBP - but
@@ -168,14 +156,12 @@ impl YouTubeDownload {
         // https://github.com/ytdl-org/youtube-dl/issues/29754 
         // Using image::io::Reader rather than image::open lets us use `with_guessed_format`, which
         // guesses using content instead of path, circumventing this
-        let reader = BufReader::new(File::open(&thumbnail_path).map_err(|e| DownloadError::IoError(Arc::new(e)))?);
+        let reader = BufReader::new(File::open(&thumbnail_path)?);
         let loaded_file = image::io::Reader::new(reader)
-            .with_guessed_format()
-            .map_err(|e| DownloadError::IoError(Arc::new(e)))?
-            .decode()
-            .map_err(|e| DownloadError::ImageError(Arc::new(e)))?;
+            .with_guessed_format()?
+            .decode()?;
         let mut jpeg_bytes = Cursor::new(vec![]);
-        loaded_file.write_to(&mut jpeg_bytes, ImageFormat::Jpeg).map_err(|e| DownloadError::ImageError(Arc::new(e)))?;
+        loaded_file.write_to(&mut jpeg_bytes, ImageFormat::Jpeg)?;
         let thumbnail_data = jpeg_bytes.into_inner();
 
         // Convert thumbnail into an ID3 picture
@@ -187,7 +173,7 @@ impl YouTubeDownload {
         };
 
         // Delete thumbnail file, since it's now encoded into ID3
-        std::fs::remove_file(thumbnail_path).map_err(|e| DownloadError::IoError(Arc::new(e)))?;
+        std::fs::remove_file(thumbnail_path)?;
             
         // Assign thumbnail
         metadata.album_art = Some(thumbnail_picture); 
@@ -195,7 +181,7 @@ impl YouTubeDownload {
         println!("[Download] Build metadata object");
 
         // Write metadata into file
-        metadata.write_into_file(&download_path).map_err(|e| DownloadError::LibraryError(e))?;
+        metadata.write_into_file(&download_path)?;
 
         println!("[Download] Written to file");
 

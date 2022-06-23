@@ -1,14 +1,15 @@
 use std::{sync::{Arc, RwLock}, future::ready, time::Duration};
 
+use anyhow::Error;
 use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container}}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time};
-use crate::{youtube::{YouTubeDownload, DownloadError, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
+use crate::{youtube::{YouTubeDownload, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
 use super::song_list::SongListMessage;
 
 #[derive(Debug, Clone)]
 pub enum DownloadMessage {
     IdInputChange(String),
     StartDownload,
-    DownloadComplete(YouTubeDownload, Result<(), DownloadError>),
+    DownloadComplete(YouTubeDownload, Result<(), String>),
     DismissErrors,
 }
 
@@ -21,7 +22,7 @@ pub struct DownloadView {
     id_input: String,
 
     pub downloads_in_progress: Vec<(YouTubeDownload, Arc<RwLock<YouTubeDownloadProgress>>)>,
-    download_errors: Vec<(YouTubeDownload, DownloadError)>,
+    download_errors: Vec<(YouTubeDownload, String)>,
 }
 
 impl DownloadView {
@@ -136,7 +137,10 @@ impl DownloadView {
                 let library_path = self.library.read().unwrap().path.clone();
                 return Command::perform(
                     (async move || {
-                        async_dl.download(&library_path, progress).await
+                        async_dl
+                            .download(&library_path, progress)
+                            .await
+                            .map_err(|e| format!("{}", e).to_string())
                     })(),
                     move |r| DownloadMessage::DownloadComplete(result_dl.clone(), r).into()
                 )

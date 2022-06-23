@@ -525,6 +525,7 @@ dependencies = [
 name = "crossplay"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-process",
  "dirs",
  "gstreamer 0.18.8",

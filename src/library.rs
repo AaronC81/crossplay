@@ -1,5 +1,6 @@
-use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::Duration, process::{Command, Output}};
+use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::Duration, process::{Command, Output}, error::Error, fmt::Display};
 
+use anyhow::Result;
 use id3::{Tag, TagLike, frame::{Comment, Picture, PictureType}};
 
 /// A collection of songs, managed by CrossPlay, saved to a particular location.
@@ -11,19 +12,6 @@ use id3::{Tag, TagLike, frame::{Comment, Picture, PictureType}};
 pub struct Library {
     pub path: PathBuf,
     loaded_songs: Vec<Song>,
-}
-
-/// An error which may occur when performing library management tasks.
-#[derive(Debug, Clone)]
-pub enum LibraryError {
-    /// An invocation of ffmpeg did not complete successfully.
-    FfmpegNonZeroExit(Output),
-    
-    /// An I/O error occurred.
-    IoError(Arc<std::io::Error>),
-
-    /// An error occurred while reading or writing an MP3 file's ID3 tags.
-    TagError(Arc<id3::Error>),
 }
 
 impl Library {
@@ -45,13 +33,13 @@ impl Library {
     ///   - Be in the root of the library folder
     ///   - Be an MP3 file with a .mp3 extension
     ///   - Have a CrossPlay video ID comment in its ID3 tags
-    pub fn load_songs(&mut self) -> Result<(), LibraryError> {
+    pub fn load_songs(&mut self) -> Result<()> {
         // Look for MP3 files at the root of the directory
         self.loaded_songs.clear();
-        let entries = read_dir(&self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+        let entries = read_dir(&self.path)?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+            let entry = entry?;
             let path = entry.path();
 
             if path.extension().map(|s| s.to_ascii_lowercase()) == Some("mp3".into()) {
@@ -107,9 +95,9 @@ impl Song {
 
     /// Creates an original copy of this song, if one does not already exist. It is the caller's
     /// responsibility to ensure this is called before modifying the file at the song's [`path`].
-    fn create_original_copy(&self) -> Result<(), LibraryError> {
+    fn create_original_copy(&self) -> Result<()> {
         if self.original_copy_path().exists() { return Ok(()) }
-        std::fs::copy(&self.path, self.original_copy_path()).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+        std::fs::copy(&self.path, self.original_copy_path())?;
 
         Ok(())
     }
@@ -118,9 +106,8 @@ impl Song {
     /// left intact.
     /// 
     /// Errors if an original does not exist.
-    pub fn restore_original_copy(&self) -> Result<(), LibraryError> {
-        std::fs::copy(self.original_copy_path(), &self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
-
+    pub fn restore_original_copy(&self) -> Result<()> {
+        std::fs::copy(self.original_copy_path(), &self.path)?;
         Ok(())
     }
 
@@ -136,7 +123,7 @@ impl Song {
     /// working copy.
     /// 
     /// This will create an original copy first, if one does not already exist.
-    pub fn crop(&mut self, start: Duration, end: Duration) -> Result<(), LibraryError> {
+    pub fn crop(&mut self, start: Duration, end: Duration) -> Result<()> {
         self.create_original_copy()?;
 
         // TODO: There are probably pure-Rust libraries for this, look into using those
@@ -154,15 +141,12 @@ impl Song {
             .arg("-acodec")
             .arg("copy")
             .arg(&self.path)
-            .output()
-            .map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+            .output()?;
 
         println!("FFMPEG is done!");
 
         // Check success
-        if !output.status.success() {
-            return Err(LibraryError::FfmpegNonZeroExit(output))
-        }
+        output.status.exit_ok()?;
 
         self.metadata.is_cropped = true;
         self.metadata.write_into_file(&self.path)?;
@@ -174,7 +158,7 @@ impl Song {
     /// [`self.metadata`], as well as setting the [`SongMetadata.is_metadata_edited`] flag to true.
     /// 
     /// This will create an original copy first, if one does not already exist.
-    pub fn user_edit_metadata(&mut self) -> Result<(), LibraryError> {
+    pub fn user_edit_metadata(&mut self) -> Result<()> {
         self.create_original_copy()?;
 
         self.metadata.is_metadata_edited = true;
@@ -184,11 +168,11 @@ impl Song {
     }
 
     /// Deletes all copies of this song (working and original) from the library folder on disk.
-    pub fn delete(&mut self) -> Result<(), LibraryError> {
+    pub fn delete(&mut self) -> Result<()> {
         if self.original_copy_path().exists() {
-            std::fs::remove_file(self.original_copy_path()).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+            std::fs::remove_file(self.original_copy_path())?;
         }
-        std::fs::remove_file(&self.path).map_err(|e| LibraryError::IoError(Arc::new(e)))?;
+        std::fs::remove_file(&self.path)?;
 
         Ok(())
     }
@@ -279,10 +263,10 @@ impl SongMetadata {
         if self.is_metadata_edited { Self::mark_metadata_edited(tag); }
     }
 
-    pub(crate) fn write_into_file(&self, file: &Path) -> Result<(), LibraryError> {
+    pub(crate) fn write_into_file(&self, file: &Path) -> Result<()> {
         let mut tag = Tag::new();
         self.write_into_tag(&mut tag);
-        Tag::write_to_path(&tag, file, id3::Version::Id3v23).map_err(|e| LibraryError::TagError(Arc::new(e)))?;
+        Tag::write_to_path(&tag, file, id3::Version::Id3v23)?;
         Ok(())
     }
 }

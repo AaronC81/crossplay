@@ -1,5 +1,6 @@
 #![feature(async_closure)]
 #![feature(iter_intersperse)]
+#![feature(exit_status_error)]
 
 use std::{sync::{Arc, RwLock}};
 
@@ -45,7 +46,7 @@ impl Application for MainView {
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let settings = Settings::load();
+        let settings = Settings::load().unwrap();
 
         let mut library = Library::new(settings.library_path.clone());
         library.load_songs().unwrap();
