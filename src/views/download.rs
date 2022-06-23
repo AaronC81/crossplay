@@ -1,7 +1,7 @@
-use std::{sync::{Arc, RwLock}, future::ready, time::Duration};
+use std::{sync::{Arc, RwLock}, future::ready, time::Duration, fmt::Display};
 
 use anyhow::Error;
-use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container}}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time};
+use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container, PickList}, Widget}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time, Image, image::Handle, Space};
 use crate::{youtube::{YouTubeDownload, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}};
 use super::song_list::SongListMessage;
 
@@ -15,6 +15,23 @@ pub enum DownloadMessage {
 
 impl From<DownloadMessage> for Message {
     fn from(dm: DownloadMessage) -> Self { Message::DownloadMessage(dm) }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum SettingsListItem {
+    TopLevel,
+    ChangeLibrary,
+    RefreshLibrary,
+}
+
+impl Display for SettingsListItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SettingsListItem::TopLevel => f.write_str("Settings"),
+            SettingsListItem::ChangeLibrary => f.write_str("Change library"),
+            SettingsListItem::RefreshLibrary => f.write_str("Refresh library"),
+        }
+    }
 }
 
 pub struct DownloadView {
@@ -40,7 +57,7 @@ impl DownloadView {
             .push(
                 Container::new(
                     Row::new()
-                        .spacing(15)
+                        .spacing(10)
                         .padding(10)
                         .height(Length::Units(60))
                         .push(
@@ -59,6 +76,23 @@ impl DownloadView {
                             )
                             .on_press(DownloadMessage::StartDownload.into())
                             .height(Length::Fill)
+                        )
+                        .push(Space::with_width(Length::Units(80)))
+                        .push(
+                            PickList::new(
+                                vec![
+                                    SettingsListItem::ChangeLibrary,
+                                    SettingsListItem::RefreshLibrary,
+                                ],
+                                Some(SettingsListItem::TopLevel),
+                                |i| match i {
+                                    SettingsListItem::TopLevel => unreachable!(),
+                                    SettingsListItem::ChangeLibrary => Message::UpdateLibraryPath,
+                                    SettingsListItem::RefreshLibrary => SongListMessage::RefreshSongList.into(),
+                                },
+                            )
+                                .padding(10)
+                                .width(Length::Shrink)
                         )
                 )
                 .style(ContainerStyleSheet(container::Style {

@@ -44,10 +44,6 @@ impl SongListView {
                         }
                     ).collect()
                 ))
-                .push(
-                    Button::new(Text::new("Refresh"))
-                        .on_press(SongListMessage::RefreshSongList.into())
-                )
         ).into()
     }
 

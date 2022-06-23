@@ -2,12 +2,12 @@
 #![feature(iter_intersperse)]
 #![feature(exit_status_error)]
 
-use std::{sync::{Arc, RwLock}};
+use std::{sync::{Arc, RwLock}, path::PathBuf, future::ready};
 
 use iced::{pure::{Element, widget::Column, Application}, executor, Command, Subscription};
 use iced_native::{subscription, window, Event};
 use library::Library;
-use native_dialog::{MessageDialog, MessageType};
+use native_dialog::{MessageDialog, MessageType, FileDialog};
 use settings::Settings;
 use views::{download::{DownloadMessage, DownloadView}, content::{ContentMessage, ContentView}};
 
@@ -28,6 +28,9 @@ fn main() {
 pub enum Message {
     None,
     Close,
+
+    UpdateLibraryPath,
+
     DownloadMessage(DownloadMessage),
     ContentMessage(ContentMessage),
 }
@@ -107,6 +110,27 @@ impl Application for MainView {
             },
             Message::ContentMessage(cm) => return self.content_view.update(cm),
             Message::DownloadMessage(dm) => return self.download_view.update(dm),
+
+            Message::UpdateLibraryPath => {
+                let confirmation = MessageDialog::new()
+                    .set_title("Pick new library?")
+                    .set_text(&format!("Would you like to pick a new library folder? Your songs will not be copied to the new location, but will be preserved in the old location so you can switch back to it later.\n\nThe current library path is: {}", self.library.read().unwrap().path.to_string_lossy()))
+                    .show_confirm();
+
+                if !confirmation.unwrap() {
+                    return Command::none();
+                }
+
+                if let Some(new_path) = FileDialog::new().show_open_single_dir().unwrap() {
+                    let mut settings = self.settings.write().unwrap();
+                    settings.library_path = new_path;
+                    settings.save().unwrap();
+
+                    self.library.write().unwrap().path = settings.library_path.clone();
+                }
+
+                return Command::perform(ready(()), |_| ContentMessage::OpenSongList.into())
+            }
         }
 
         Command::none()
