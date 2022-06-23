@@ -9,7 +9,7 @@ pub enum DownloadMessage {
     IdInputChange(String),
     StartDownload,
     DownloadComplete(YouTubeDownload, Result<(), DownloadError>),
-    ToggleStatus,
+    DismissErrors,
 }
 
 impl From<DownloadMessage> for Message {
@@ -19,11 +19,9 @@ impl From<DownloadMessage> for Message {
 pub struct DownloadView {
     library: Arc<RwLock<Library>>,
     id_input: String,
-    status_showing: bool,
 
     pub downloads_in_progress: Vec<(YouTubeDownload, Arc<RwLock<YouTubeDownloadProgress>>)>,
     download_errors: Vec<(YouTubeDownload, DownloadError)>,
-    any_download_occurred: bool,
 }
 
 impl DownloadView {
@@ -31,10 +29,8 @@ impl DownloadView {
         Self {
             library,
             id_input: "".to_string(),
-            status_showing: false,
             downloads_in_progress: vec![],
             download_errors: vec![],
-            any_download_occurred: false,
         }
     }
 
@@ -63,43 +59,18 @@ impl DownloadView {
                             .on_press(DownloadMessage::StartDownload.into())
                             .height(Length::Fill)
                         )
-                        .push(
-                            Button::new(
-                                Row::new()
-                                    .height(Length::Fill)
-                                    .push(
-                                        Text::new(
-                                            if !self.downloads_in_progress.is_empty() {
-                                                format!("{} download(s) in progress", self.downloads_in_progress.len())
-                                            } else if self.any_download_occurred {
-                                                "All downloads complete".to_string()
-                                            } else {
-                                                "No downloads in progress".to_string()
-                                            }
-                                        )
-                                            .vertical_alignment(Vertical::Center)
-                                            .height(Length::Fill)
-                                    )
-                                    .push_if(!self.download_errors.is_empty(), ||
-                                        Text::new(format!("{} download(s) failed", self.download_errors.len()))
-                                            .vertical_alignment(Vertical::Center)
-                                            .height(Length::Fill)
-                                            .color([1.0, 0.0, 0.0])
-                                    )
-                                    .spacing(10)
-                            )
-                            .on_press(DownloadMessage::ToggleStatus.into())
-                            .height(Length::Fill)
-                        )
                 )
                 .style(ContainerStyleSheet(container::Style {
                     background: Some(Background::Color([0.85, 0.85, 0.85].into())),
                     ..Default::default()
                 }))
             )
-            .push_if(self.status_showing, ||
+            .push_if(!self.downloads_in_progress.is_empty() || !self.download_errors.is_empty(), ||
                 Container::new(
                     Column::new()
+                        .push_if(!self.downloads_in_progress.is_empty(), ||
+                            Text::new(format!("{} download(s) in progress...", self.downloads_in_progress.len()))
+                        )
                         .push_if(!self.downloads_in_progress.is_empty(), ||
                             Column::with_children(self.downloads_in_progress.iter().map(|(dl, prog)| {
                                 let prog = prog.read().unwrap();
@@ -122,22 +93,24 @@ impl DownloadView {
                             }).collect())
                                 .spacing(10)
                         )
-                        .push_if(self.downloads_in_progress.is_empty(), ||
-                            Text::new("No downloads in progress.")
-                        )
-                        .push(Rule::horizontal(10))
-                        .push(
-                            Column::with_children(if self.download_errors.is_empty() {
-                                vec![Text::new("No download errors have occurred.").into()]
-                            } else {
-                                self.download_errors.iter().map(|(dl, err)| {
-                                    Text::new(format!("Download {} failed: {:?}", dl.id, err)).color([1.0, 0.0, 0.0]).into()
-                                }).collect()
-                            })
+                        .push_if(!self.download_errors.is_empty(), ||
+                            Column::new()
+                                .push_if(!self.downloads_in_progress.is_empty(), || Rule::horizontal(10))
+                                .push(
+                                    Column::with_children(
+                                        self.download_errors.iter().map(|(dl, err)| {
+                                            Text::new(format!("Download {} failed: {:?}", dl.id, err)).color([1.0, 0.0, 0.0]).into()
+                                        }).collect()
+                                    )
+                                )
+                                .push(
+                                    Button::new(Text::new("OK"))
+                                        .on_press(DownloadMessage::DismissErrors.into())
+                                )
                         )
                 )
-                .width(Length::Fill)
                 .padding(10)
+                .width(Length::Fill)
                 .style(ContainerStyleSheet(container::Style {
                     background: Some(Background::Color([0.9, 0.9, 0.9].into())),
                     ..Default::default()
@@ -151,8 +124,6 @@ impl DownloadView {
             DownloadMessage::IdInputChange(s) => self.id_input = s,
 
             DownloadMessage::StartDownload => {
-                self.any_download_occurred = true;
-
                 // Need two named copies for the two closures
                 let id = extract_video_id(&self.id_input);
                 let async_dl = YouTubeDownload::new(id);
@@ -182,7 +153,7 @@ impl DownloadView {
                 return Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
             },
 
-            DownloadMessage::ToggleStatus => self.status_showing = !self.status_showing,
+            DownloadMessage::DismissErrors => self.download_errors.clear(),
         }
 
         Command::none()
