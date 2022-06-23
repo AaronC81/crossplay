@@ -3,19 +3,21 @@
 
 use std::{sync::{Arc, RwLock}};
 
-use iced::{pure::{Element, widget::Column, Application}, Settings, executor, Command, Subscription};
+use iced::{pure::{Element, widget::Column, Application}, executor, Command, Subscription};
 use iced_native::{subscription, window, Event};
 use library::Library;
 use native_dialog::{MessageDialog, MessageType};
+use settings::Settings;
 use views::{download::{DownloadMessage, DownloadView}, content::{ContentMessage, ContentView}};
 
 mod youtube;
 mod library;
 mod views;
 mod ui_util;
+mod settings;
 
 fn main() {
-    let mut settings = Settings::with_flags(());
+    let mut settings = iced::Settings::with_flags(());
     settings.exit_on_close_request = false;
 
     MainView::run(settings).unwrap();
@@ -31,6 +33,7 @@ pub enum Message {
 
 struct MainView {
     library: Arc<RwLock<Library>>,
+    settings: Arc<RwLock<Settings>>,
     
     download_view: DownloadView,
     content_view: ContentView,
@@ -42,13 +45,18 @@ impl Application for MainView {
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let mut library = Library::new("/Users/aaron/Music/CrossPlay".into());
+        let settings = Settings::load();
+
+        let mut library = Library::new(settings.library_path.clone());
         library.load_songs().unwrap();
+
         let library = Arc::new(RwLock::new(library));
+        let settings = Arc::new(RwLock::new(settings));
     
         (
             MainView {
                 library: library.clone(),
+                settings,
 
                 download_view: DownloadView::new(library.clone()),
                 content_view: ContentView::new(library.clone()),
