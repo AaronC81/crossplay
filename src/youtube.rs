@@ -224,8 +224,8 @@ impl YouTubeDownload {
 /// If neither of these match, then the original string will be returned. As such, there is no
 /// guarantee that the video ID will be valid or in the correct format.
 pub fn extract_video_id(string: &str) -> &str {
-    let long_url_regex = Regex::new(r"youtube.com/watch\?v=(.+)&?").unwrap();
-    let short_url_regex = Regex::new(r"youtu.be/(.+)&?").unwrap();
+    let long_url_regex = Regex::new(r"youtube.com/watch\?v=([^&]+)&?").unwrap();
+    let short_url_regex = Regex::new(r"youtu.be/([^&]+)&?").unwrap();
 
     if let Some(c) = long_url_regex.captures(string) {
         return c.get(1).unwrap().as_str();
