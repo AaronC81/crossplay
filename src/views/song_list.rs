@@ -2,13 +2,16 @@ use std::{sync::{Arc, RwLock}, future::ready};
 
 use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button, Scrollable}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
 use native_dialog::{MessageDialog, MessageType};
-use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}};
+use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}, settings::{Settings, SortBy, SortDirection}};
 
 use super::content::ContentMessage;
 
 #[derive(Debug, Clone)]
 pub enum SongListMessage {
     RefreshSongList,
+    ChangeSort(SortBy),
+    ToggleSortReverse,
+
     RestoreOriginal(Song),
     Delete(Song),
 }
@@ -19,15 +22,16 @@ impl From<SongListMessage> for Message {
 
 pub struct SongListView {
     library: Arc<RwLock<Library>>,
+    settings: Arc<RwLock<Settings>>,
+
     song_views: Vec<(Song, SongView)>,
 }
 
 impl SongListView {
-    pub fn new(library: Arc<RwLock<Library>>) -> Self {        
-        let mut song_views = vec![];
-        Self::rebuild_song_views(library.clone(), &mut song_views);
-        
-        Self { library, song_views }
+    pub fn new(library: Arc<RwLock<Library>>, settings: Arc<RwLock<Settings>>) -> Self {
+        let mut result = Self { library, settings, song_views: vec![] };
+        result.rebuild_song_views();
+        result
     }
 
     pub fn view(&self) -> Element<Message> {
@@ -36,13 +40,18 @@ impl SongListView {
                 .align_items(Alignment::Center)
                 .spacing(10)
                 .push(Column::with_children(
-                    self.song_views.iter().map(|x| Some(x)).intersperse_with(|| None).map(|view|
-                        if let Some((_, view)) = view {
-                            view.view().into()
-                        } else {
-                            Rule::horizontal(10).into()
-                        }
-                    ).collect()
+                    self.song_views
+                        .iter()
+                        .map(|x| Some(x))
+                        .intersperse_with(|| None)
+                        .map(|view|
+                            if let Some((_, view)) = view {
+                                view.view().into()
+                            } else {
+                                Rule::horizontal(10).into()
+                            }
+                        )
+                        .collect()
                 ))
         ).into()
     }
@@ -52,6 +61,28 @@ impl SongListView {
             SongListMessage::RefreshSongList => {
                 // The content view does this for us!
                 Command::perform(ready(()), |_| ContentMessage::OpenSongList.into())
+            }
+
+            SongListMessage::ChangeSort(sort) => {
+                let mut settings = self.settings.write().unwrap();
+                settings.sort_by = sort;
+                settings.save().expect("failed to save settings");
+                drop(settings);
+
+                self.sort_song_views();
+
+                Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
+            }
+
+            SongListMessage::ToggleSortReverse => {
+                let mut settings = self.settings.write().unwrap();
+                settings.sort_direction = settings.sort_direction.reverse();
+                settings.save().expect("failed to save settings");
+                drop(settings);
+
+                self.sort_song_views();
+
+                Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
             }
 
             SongListMessage::RestoreOriginal(song) => {
@@ -94,14 +125,37 @@ impl SongListView {
         }
     }
 
-    fn rebuild_song_views(library: Arc<RwLock<Library>>, views: &mut Vec<(Song, SongView)>) {
-        views.clear();
+    fn rebuild_song_views(&mut self) {
+        self.song_views.clear();
 
-        let library_reader = library.read().unwrap();
+        let library_reader = self.library.read().unwrap();
         let songs = library_reader.songs();
 
         for song in songs {
-            views.push((song.clone(), SongView::new(library.clone(), song.clone())))
+            self.song_views.push((song.clone(), SongView::new(self.library.clone(), song.clone())))
+        }
+
+        drop(library_reader);
+
+        self.sort_song_views();
+    }
+
+    fn sort_song_views(&mut self) {
+        let settings = self.settings.read().unwrap();
+        
+        match settings.sort_by {
+            SortBy::Title => self.song_views.sort_by_key(|(s, _)| s.metadata.title.clone().to_lowercase()),
+            SortBy::Artist => self.song_views.sort_by_key(|(s, _)| s.metadata.artist.clone().to_lowercase()),
+            SortBy::Album => self.song_views.sort_by_key(|(s, _)| s.metadata.album.clone().to_lowercase()),
+            
+            // It makes sense for the default order of download time to go from newest to oldest,
+            // so "invert" the u64 by subtracting it from the largest possible
+            SortBy::Downloaded => self.song_views.sort_by_key(|(s, _)| u64::MAX - s.metadata.download_unix_time),
+        }
+
+        match settings.sort_direction {
+            SortDirection::Normal => (),
+            SortDirection::Reverse => self.song_views.reverse(),
         }
     }
 }

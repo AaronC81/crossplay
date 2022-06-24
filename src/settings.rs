@@ -3,9 +3,39 @@ use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use anyhow::Result;
 
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
+pub enum SortBy {
+    Title,
+    Artist,
+    Album,
+    Downloaded,
+}
+
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
+pub enum SortDirection {
+    Normal,
+    Reverse,
+}
+
+impl SortDirection {
+    pub fn reverse(self) -> SortDirection {
+        match self {
+            SortDirection::Normal => SortDirection::Reverse,
+            SortDirection::Reverse => SortDirection::Normal,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(default = "Settings::default_library_path")]
     pub library_path: PathBuf,
+
+    #[serde(default = "Settings::default_sort_by")]
+    pub sort_by: SortBy,
+
+    #[serde(default = "Settings::default_sort_direction")]
+    pub sort_direction: SortDirection,
 }
 
 impl Settings {
@@ -16,6 +46,12 @@ impl Settings {
     pub fn settings_path() -> PathBuf {
         Self::settings_dir().join("settings.json")
     }
+
+    pub fn default_library_path() -> PathBuf {
+        dirs::audio_dir().expect("unknown OS").join("CrossPlay")
+    }
+    pub fn default_sort_by() -> SortBy { SortBy::Downloaded }
+    pub fn default_sort_direction() -> SortDirection { SortDirection::Normal }
 
     /// Loads the application settings, or creates them from defaults if they do not exist.
     pub fn load() -> Result<Self> {
@@ -50,7 +86,9 @@ impl Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            library_path: dirs::audio_dir().expect("unknown OS").join("CrossPlay")
+            library_path: Self::default_library_path(),
+            sort_by: Self::default_sort_by(),
+            sort_direction: Self::default_sort_direction(),
         }
     }
 }

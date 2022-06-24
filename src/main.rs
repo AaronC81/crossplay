@@ -60,10 +60,10 @@ impl Application for MainView {
         (
             MainView {
                 library: library.clone(),
-                settings,
+                settings: settings.clone(),
 
                 download_view: DownloadView::new(library.clone()),
-                content_view: ContentView::new(library.clone()),
+                content_view: ContentView::new(library.clone(), settings.clone()),
             },
             Command::none()
         )

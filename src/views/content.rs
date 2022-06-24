@@ -2,7 +2,7 @@ use std::sync::{RwLock, Arc};
 
 use iced::{pure::Element, Subscription, Command};
 
-use crate::{library::{Song, Library}, Message};
+use crate::{library::{Song, Library}, Message, settings::Settings};
 
 use super::{song_list::{SongListMessage, SongListView}, crop::{CropView, CropMessage}, edit_metadata::{EditMetadataView, EditMetadataMessage}};
 
@@ -29,14 +29,17 @@ enum ContentViewState {
 
 pub struct ContentView {
     library: Arc<RwLock<Library>>,
+    settings: Arc<RwLock<Settings>>,
+
     state: ContentViewState,
 }
 
 impl ContentView {
-    pub fn new(library: Arc<RwLock<Library>>) -> Self {
+    pub fn new(library: Arc<RwLock<Library>>, settings: Arc<RwLock<Settings>>) -> Self {
         Self {
             library: library.clone(),
-            state: ContentViewState::SongList(SongListView::new(library)),
+            settings: settings.clone(),
+            state: ContentViewState::SongList(SongListView::new(library, settings)),
         }
     }
 
@@ -59,7 +62,9 @@ impl ContentView {
         match message {
             ContentMessage::OpenSongList => {
                 self.library.write().unwrap().load_songs().unwrap();
-                self.state = ContentViewState::SongList(SongListView::new(self.library.clone()));
+                self.state = ContentViewState::SongList(
+                    SongListView::new(self.library.clone(), self.settings.clone())
+                );
             },
 
             ContentMessage::OpenCrop(song) =>
