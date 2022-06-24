@@ -1,4 +1,4 @@
-use std::{sync::{Arc, RwLock}, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File, error::Error, fmt::Display};
+use std::{sync::{Arc, RwLock}, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File, error::Error, fmt::Display, time::{SystemTime, UNIX_EPOCH}};
 
 use anyhow::{Result, anyhow};
 use async_process::{Command, Output, Stdio, ExitStatus};
@@ -117,6 +117,7 @@ impl YouTubeDownload {
                     album_art: None,
                     is_cropped: false,
                     is_metadata_edited: false,
+                    download_unix_time: unix_time_now(),
                 }
             );
             drop(progress_reader);
@@ -199,6 +200,7 @@ impl YouTubeDownload {
             album_art: None,
             is_cropped: false,
             is_metadata_edited: false,
+            download_unix_time: unix_time_now(),
         })
     }
 }
@@ -222,4 +224,11 @@ pub fn extract_video_id(string: &str) -> &str {
     }
 
     string
+}
+
+fn unix_time_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
 }

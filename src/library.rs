@@ -1,4 +1,4 @@
-use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::Duration, process::{Command, Output}, error::Error, fmt::Display};
+use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::{Duration, Instant}, process::{Command, Output}, error::Error, fmt::Display};
 
 use anyhow::Result;
 use id3::{Tag, TagLike, frame::{Comment, Picture, PictureType}};
@@ -48,6 +48,11 @@ impl Library {
                 // If there's no video ID, then this didn't come from CrossPlay, so ignore it
                 if let Ok(tag) = tag {
                     if let Some(video_id) = SongMetadata::get_youtube_id(&tag) {
+                        let download_unix_time: u64 = SongMetadata::get_download_unix_time(&tag)
+                            .map(|c| c.text.parse().ok())
+                            .flatten()
+                            .unwrap_or(0);
+                        
                         let metadata = SongMetadata {
                             title: tag.title().unwrap_or("Unknown Title").into(),
                             artist: tag.artist().unwrap_or("Unknown Artist").into(),
@@ -56,6 +61,7 @@ impl Library {
                             album_art: SongMetadata::get_album_art(&tag),
                             is_cropped: SongMetadata::get_cropped(&tag),
                             is_metadata_edited: SongMetadata::get_metadata_edited(&tag),
+                            download_unix_time,
                         };
 
                         self.loaded_songs.push(Song::new(path, metadata));
@@ -188,11 +194,13 @@ pub struct SongMetadata {
 
     pub is_cropped: bool,
     pub is_metadata_edited: bool,
+    pub download_unix_time: u64,
 }
 
 const TAG_KEY_YOUTUBE_ID: &str = "[CrossPlay] YouTube ID";
 const TAG_KEY_IS_CROPPED: &str = "[CrossPlay] Cropped";
 const TAG_KEY_IS_METADATA_EDITED: &str = "[CrossPlay] Metadata edited";
+const TAG_KEY_DOWNLOAD_TIME: &str = "[CrossPlay] Download time";
 
 impl SongMetadata {
     fn get_youtube_id(tag: &Tag) -> Option<Comment> {
@@ -236,6 +244,23 @@ impl SongMetadata {
         });
     }
 
+    fn get_download_unix_time(tag: &Tag) -> Option<Comment> {
+        tag.comments().find(|c| c.description == TAG_KEY_DOWNLOAD_TIME).cloned()
+    }
+
+    fn set_download_unix_time(&self, tag: &mut Tag) {
+        // If there's already a time, remove it
+        if let Some(comment) = Self::get_download_unix_time(tag) {
+            tag.remove_comment(Some(&comment.description), Some(&comment.text))
+        }
+
+        tag.add_frame(Comment {
+            lang: "eng".into(),
+            description: TAG_KEY_DOWNLOAD_TIME.into(),
+            text: self.download_unix_time.to_string(),
+        });
+    }
+
     fn get_album_art(tag: &Tag) -> Option<Picture> {
         tag.frames().find_map(|f|
             if let Some(picture) = f.content().picture() {
@@ -258,6 +283,7 @@ impl SongMetadata {
             tag.add_frame(album_art);
         }
         self.set_youtube_id(tag);
+        self.set_download_unix_time(tag);
 
         if self.is_cropped { Self::mark_cropped(tag); }
         if self.is_metadata_edited { Self::mark_metadata_edited(tag); }
