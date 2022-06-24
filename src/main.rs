@@ -16,6 +16,7 @@ mod library;
 mod views;
 mod ui_util;
 mod settings;
+mod assets;
 
 fn main() {
     let mut settings = iced::Settings::with_flags(());

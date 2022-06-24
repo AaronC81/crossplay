@@ -2,7 +2,7 @@ use std::{sync::{Arc, RwLock}, future::ready};
 
 use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button, Scrollable}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
 use native_dialog::{MessageDialog, MessageType};
-use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}, settings::{Settings, SortBy, SortDirection}};
+use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}, settings::{Settings, SortBy, SortDirection}, assets};
 
 use super::content::ContentMessage;
 
@@ -191,22 +191,22 @@ impl SongView {
             // TODO: these buttons aren't responsive at all!
             // Too long a title will cause these to go tiny
             .push(
-                Button::new(Image::new(Handle::from_path("assets/edit.png")))
+                Button::new(Image::new(assets::EDIT))
                     .on_press(ContentMessage::OpenEditMetadata(self.song.clone()).into())
                     .width(Length::Units(40))
             )
             .push(
-                Button::new(Image::new(Handle::from_path(if self.song.metadata.is_cropped { "assets/crop_disabled.png" } else { "assets/crop.png" })))
+                Button::new(Image::new(if self.song.metadata.is_cropped { assets::CROP_DISABLED } else { assets::CROP }))
                     .on_press_if(!self.song.metadata.is_cropped, ContentMessage::OpenCrop(self.song.clone()).into())
                     .width(Length::Units(40))
             )
             .push(
-                Button::new(Image::new(Handle::from_path(if self.song.is_modified() { "assets/restore.png" } else { "assets/restore_disabled.png" })))
+                Button::new(Image::new(if self.song.is_modified() { assets::RESTORE } else { assets::RESTORE_DISABLED }))
                     .on_press_if(self.song.is_modified(), SongListMessage::RestoreOriginal(self.song.clone()).into())
                     .width(Length::Units(40))
             )
             .push(
-                Button::new(Image::new(Handle::from_path("assets/delete.png")))
+                Button::new(Image::new(assets::DELETE))
                     .on_press(SongListMessage::Delete(self.song.clone()).into())
                     .width(Length::Units(40))
             )
