@@ -1,7 +1,9 @@
-use std::{path::{PathBuf, Path}, fs::read_dir, rc::Rc, sync::Arc, time::{Duration, Instant}, process::{Command, Output}, error::Error, fmt::Display};
+use std::{path::{PathBuf, Path}, fs::read_dir, time::Duration, process::Command};
 
 use anyhow::Result;
-use id3::{Tag, TagLike, frame::{Comment, Picture, PictureType}};
+use id3::{Tag, TagLike, frame::{Picture, PictureType}};
+
+use crate::tag_interface::{YouTubeIdTag, DownloadTimeTag, CroppedTag, MetadataEditedTag, CustomTagExtensions};
 
 /// A collection of songs, managed by CrossPlay, saved to a particular location.
 /// 
@@ -47,23 +49,7 @@ impl Library {
         
                 // If there's no video ID, then this didn't come from CrossPlay, so ignore it
                 if let Ok(tag) = tag {
-                    if let Some(video_id) = SongMetadata::get_youtube_id(&tag) {
-                        let download_unix_time: u64 = SongMetadata::get_download_unix_time(&tag)
-                            .map(|c| c.text.parse().ok())
-                            .flatten()
-                            .unwrap_or(0);
-                        
-                        let metadata = SongMetadata {
-                            title: tag.title().unwrap_or("Unknown Title").into(),
-                            artist: tag.artist().unwrap_or("Unknown Artist").into(),
-                            album: tag.album().unwrap_or("Unknown Album").into(),
-                            youtube_id: video_id.text.into(),
-                            album_art: SongMetadata::get_album_art(&tag),
-                            is_cropped: SongMetadata::get_cropped(&tag),
-                            is_metadata_edited: SongMetadata::get_metadata_edited(&tag),
-                            download_unix_time,
-                        };
-
+                    if let Ok(metadata) = Self::load_one_song_metadata(tag) {
                         self.loaded_songs.push(Song::new(path, metadata));
                     }
                 }
@@ -71,6 +57,19 @@ impl Library {
         }
 
         Ok(())
+    }
+
+    fn load_one_song_metadata(tag: Tag) -> Result<SongMetadata> {            
+        Ok(SongMetadata {
+            title: tag.title().unwrap_or("Unknown Title").into(),
+            artist: tag.artist().unwrap_or("Unknown Artist").into(),
+            album: tag.album().unwrap_or("Unknown Album").into(),
+            youtube_id: tag.read_custom::<YouTubeIdTag>()?,
+            album_art: SongMetadata::get_album_art(&tag),
+            is_cropped: tag.read_custom::<CroppedTag>()?,
+            is_metadata_edited: tag.read_custom::<MetadataEditedTag>()?,
+            download_unix_time: tag.read_custom::<DownloadTimeTag>()?,
+        })
     }
 }
 
@@ -197,70 +196,7 @@ pub struct SongMetadata {
     pub download_unix_time: u64,
 }
 
-const TAG_KEY_YOUTUBE_ID: &str = "[CrossPlay] YouTube ID";
-const TAG_KEY_IS_CROPPED: &str = "[CrossPlay] Cropped";
-const TAG_KEY_IS_METADATA_EDITED: &str = "[CrossPlay] Metadata edited";
-const TAG_KEY_DOWNLOAD_TIME: &str = "[CrossPlay] Download time";
-
 impl SongMetadata {
-    fn get_youtube_id(tag: &Tag) -> Option<Comment> {
-        tag.comments().find(|c| { c.description == TAG_KEY_YOUTUBE_ID }).map(|c| c.clone())
-    }
-    
-    fn set_youtube_id(&self, tag: &mut Tag) {
-        // If there's already an ID, remove it
-        if let Some(comment) = Self::get_youtube_id(tag) {
-            tag.remove_comment(Some(&comment.description), Some(&comment.text))
-        }
-
-        tag.add_frame(Comment {
-            lang: "eng".into(),
-            description: TAG_KEY_YOUTUBE_ID.into(),
-            text: self.youtube_id.clone(),
-        });
-    }
-
-    fn get_cropped(tag: &Tag) -> bool {
-        tag.comments().find(|c| { c.description == TAG_KEY_IS_CROPPED }).is_some()
-    }
-
-    fn mark_cropped(tag: &mut Tag) {
-        tag.add_frame(Comment {
-            lang: "eng".into(),
-            description: TAG_KEY_IS_CROPPED.into(),
-            text: "".into(),
-        });
-    }
-
-    fn get_metadata_edited(tag: &Tag) -> bool {
-        tag.comments().find(|c| { c.description == TAG_KEY_IS_METADATA_EDITED }).is_some()
-    }
-
-    fn mark_metadata_edited(tag: &mut Tag) {
-        tag.add_frame(Comment {
-            lang: "eng".into(),
-            description: TAG_KEY_IS_METADATA_EDITED.into(),
-            text: "".into(),
-        });
-    }
-
-    fn get_download_unix_time(tag: &Tag) -> Option<Comment> {
-        tag.comments().find(|c| c.description == TAG_KEY_DOWNLOAD_TIME).cloned()
-    }
-
-    fn set_download_unix_time(&self, tag: &mut Tag) {
-        // If there's already a time, remove it
-        if let Some(comment) = Self::get_download_unix_time(tag) {
-            tag.remove_comment(Some(&comment.description), Some(&comment.text))
-        }
-
-        tag.add_frame(Comment {
-            lang: "eng".into(),
-            description: TAG_KEY_DOWNLOAD_TIME.into(),
-            text: self.download_unix_time.to_string(),
-        });
-    }
-
     fn get_album_art(tag: &Tag) -> Option<Picture> {
         tag.frames().find_map(|f|
             if let Some(picture) = f.content().picture() {
@@ -276,17 +212,21 @@ impl SongMetadata {
     }
 
     fn write_into_tag(&self, tag: &mut Tag) {
-        tag.set_title(self.title.clone());
-        tag.set_artist(self.artist.clone());
-        tag.set_album(self.album.clone());
-        if let Some(album_art) = self.album_art.clone() {
+        // Unpacking here looks a bit weird, but it ensures that new fields will cause an error if
+        // we forget to consider saving them
+        let Self { title, artist, album, youtube_id, album_art, is_cropped, is_metadata_edited, download_unix_time } = self;
+
+        tag.set_title(title.clone());
+        tag.set_artist(artist.clone());
+        tag.set_album(album.clone());
+        if let Some(album_art) = album_art.clone() {
             tag.add_frame(album_art);
         }
-        self.set_youtube_id(tag);
-        self.set_download_unix_time(tag);
 
-        if self.is_cropped { Self::mark_cropped(tag); }
-        if self.is_metadata_edited { Self::mark_metadata_edited(tag); }
+        tag.write_custom::<YouTubeIdTag>(youtube_id.to_string());
+        tag.write_custom::<DownloadTimeTag>(*download_unix_time);
+        tag.write_custom::<CroppedTag>(*is_cropped);
+        tag.write_custom::<MetadataEditedTag>(*is_metadata_edited);
     }
 
     pub(crate) fn write_into_file(&self, file: &Path) -> Result<()> {

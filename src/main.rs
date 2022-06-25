@@ -2,7 +2,7 @@
 #![feature(iter_intersperse)]
 #![feature(exit_status_error)]
 
-use std::{sync::{Arc, RwLock}, path::PathBuf, future::ready};
+use std::{sync::{Arc, RwLock}, future::ready};
 
 use iced::{pure::{Element, widget::Column, Application}, executor, Command, Subscription};
 use iced_native::{subscription, window, Event};
@@ -17,6 +17,7 @@ mod views;
 mod ui_util;
 mod settings;
 mod assets;
+mod tag_interface;
 
 fn main() {
     let mut settings = iced::Settings::with_flags(());
