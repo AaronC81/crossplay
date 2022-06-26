@@ -1,8 +1,20 @@
 use anyhow::{Result, anyhow};
 use id3::{frame::Comment, Tag, TagLike};
 
+/// A custom item of metadata which is stored inside an MP3 file, as an ID3 comment.
+/// 
+/// This wrapper trait facilitates converting to/from the string content of the tag, and handling
+/// the case where a tag is missing.
+/// 
+/// More precisely, the `CustomTag::NAME` field is used as the "text" of the comment, and the value
+/// is the "description".
 pub trait CustomTag {
+    /// The type of value which this tag represents. Loading the tag returns this type by parsing
+    /// the comment's text with `from_comment_text`, and saving converts it to a string using
+    /// `to_comment_text`.
     type T;
+
+    /// The full ID3 name of the comment.
     const NAME: &'static str;
 
     /// Converts the contents of the comment's text into this tag's value type.
@@ -19,8 +31,14 @@ pub trait CustomTag {
     fn value_if_comment_missing() -> Option<Self::T>;
 }
 
+/// An extension trait implemented only on `id3::tag::Tag`.
 pub trait CustomTagExtensions {
+    /// Writes custom metadata as a comment into this tag, overwriting any previous value. Depending
+    /// on the tag, this may also delete the comment entirely.
     fn write_custom<C: CustomTag>(&mut self, value: C::T);
+
+    /// Reads custom metadata as a comment from this tag. If the comment is missing, then depending
+    /// on the tag, this may either return a default value or an error.
     fn read_custom<C: CustomTag>(&self) -> Result<C::T>;
 }
 
@@ -57,6 +75,8 @@ impl CustomTagExtensions for Tag {
     }
 }
 
+/// A boolean metadata item, where the value is true if the comment is present, and false if the
+/// comment is not present.
 pub trait FlagTag {
     const NAME: &'static str;
 }
