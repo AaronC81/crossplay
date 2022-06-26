@@ -42,11 +42,11 @@ impl SongListView {
                 .push(Column::with_children(
                     self.song_views
                         .iter()
-                        .map(|x| Some(x))
+                        .map(Some)
                         .intersperse_with(|| None)
                         .map(|view|
                             if let Some((_, view)) = view {
-                                view.view().into()
+                                view.view()
                             } else {
                                 Rule::horizontal(10).into()
                             }

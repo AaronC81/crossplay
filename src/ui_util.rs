@@ -12,7 +12,7 @@ pub(crate) trait ElementContainerExtensions<'a, Message> where Self: Sized {
     }
 
     fn push_if_let<T: Into<Element<'a, Message>>, O>(self, option: &Option<O>, child_fn: impl FnOnce(&O) -> T) -> Self {
-        if let Some(ref o) = option.as_ref() {
+        if let Some(o) = option.as_ref() {
             self.push(child_fn(o))
         } else {
             self
@@ -20,10 +20,12 @@ pub(crate) trait ElementContainerExtensions<'a, Message> where Self: Sized {
     }
 }
 
+#[allow(clippy::only_used_in_recursion)]
 impl<'a, Message> ElementContainerExtensions<'a, Message> for Row<'a, Message> {
     fn push(self, child: impl Into<Element<'a, Message>>) -> Self { self.push(child) }
 }
 
+#[allow(clippy::only_used_in_recursion)]
 impl<'a, Message> ElementContainerExtensions<'a, Message> for Column<'a, Message> {
     fn push(self, child: impl Into<Element<'a, Message>>) -> Self { self.push(child) }
 }

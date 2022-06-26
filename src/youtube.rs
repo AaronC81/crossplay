@@ -26,6 +26,10 @@ impl YouTubeDownloadProgress {
     }
 }
 
+impl Default for YouTubeDownloadProgress {
+    fn default() -> Self { Self::new() }
+}
+
 impl YouTubeDownload {
     pub fn new(id: impl Into<String>) -> Self {
         Self { id: id.into() }
@@ -149,7 +153,7 @@ impl YouTubeDownload {
                     None
                 }
             })
-            .ok_or(anyhow!("Downloaded thumbnail could not be located."))?;
+            .ok_or_else(|| anyhow!("Downloaded thumbnail could not be located."))?;
 
         // Convert to JPEG
         // Originally, this tried to be clever and only convert if the image was a WEBP - but

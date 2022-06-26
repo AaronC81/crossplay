@@ -210,12 +210,12 @@ impl DownloadView {
                 
                 let library_path = self.library.read().unwrap().path.clone();
                 return Command::perform(
-                    (async move || {
+                    async move {
                         async_dl
                             .download(&library_path, progress)
                             .await
-                            .map_err(|e| format!("{}", e).to_string())
-                    })(),
+                            .map_err(|e| format!("{}", e))
+                    },
                     move |r| DownloadMessage::DownloadComplete(result_dl.clone(), r).into()
                 )
             },
