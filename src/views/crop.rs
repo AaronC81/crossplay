@@ -4,7 +4,7 @@ use iced::{Command, Subscription, time, pure::{Element, widget::{Column, Slider,
 use iced_video_player::{VideoPlayer, VideoPlayerMessage};
 use url::Url;
 
-use crate::{library::Song, Message, ui_util::{ElementContainerExtensions, ButtonExtensions, ContainerStyleSheet}};
+use crate::{library::Song, Message, ui_util::{ButtonExtensions, ContainerStyleSheet}};
 
 use super::content::ContentMessage;
 

@@ -1,6 +1,6 @@
 use std::{sync::{Arc, RwLock}, future::ready};
 
-use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, button, Scrollable}}, image::Handle, Space, Length, Alignment, alignment::Horizontal};
+use iced::{Command, pure::{Element, widget::{Column, Text, Button, Rule, Row, Image, Scrollable}}, image::Handle, Space, Length, Alignment};
 use native_dialog::{MessageDialog, MessageType};
 use crate::{library::{Library, Song}, Message, ui_util::{ElementContainerExtensions, ButtonExtensions}, settings::{Settings, SortBy, SortDirection}, assets};
 
@@ -160,6 +160,7 @@ impl SongListView {
     }
 }
 
+#[allow(unused)]
 struct SongView {
     library: Arc<RwLock<Library>>,
     song: Song,

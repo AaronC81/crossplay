@@ -1,14 +1,14 @@
-use std::{sync::{Arc, RwLock}, ops::Deref, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File, error::Error, fmt::Display, time::{SystemTime, UNIX_EPOCH}};
+use std::{sync::{Arc, RwLock}, io::{Cursor, BufReader}, path::{PathBuf, Path}, fs::File, time::{SystemTime, UNIX_EPOCH}};
 
 use anyhow::{Result, anyhow};
-use async_process::{Command, Output, Stdio, ExitStatus};
+use async_process::{Command, Stdio};
 use id3::frame::Picture;
-use image::{ImageBuffer, ImageError, ImageFormat};
+use image::ImageFormat;
 use regex::Regex;
 use serde_json::Value;
 use iced::futures::{io::BufReader as AsyncBufReader, AsyncBufReadExt, StreamExt};
 
-use crate::library::{Library, SongMetadata};
+use crate::library::SongMetadata;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct YouTubeDownload {

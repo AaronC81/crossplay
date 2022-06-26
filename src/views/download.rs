@@ -1,7 +1,6 @@
 use std::{sync::{Arc, RwLock}, future::ready, time::Duration, fmt::Display};
 
-use anyhow::Error;
-use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container, PickList}, Widget}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time, Image, image::Handle, Space};
+use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container, PickList}}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time, Space};
 use crate::{youtube::{YouTubeDownload, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}, settings::{SortBy, Settings}};
 use super::song_list::SongListMessage;
 
