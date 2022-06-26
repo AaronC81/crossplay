@@ -2,7 +2,7 @@ use std::{sync::{Arc, RwLock}, future::ready, time::Duration, fmt::Display};
 
 use anyhow::Error;
 use iced::{pure::{Element, widget::{Column, Text, Button, TextInput, Row, Container, PickList}, Widget}, container, Background, Length, alignment::Vertical, Rule, Command, ProgressBar, Subscription, time, Image, image::Handle, Space};
-use crate::{youtube::{YouTubeDownload, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}, settings::SortBy};
+use crate::{youtube::{YouTubeDownload, YouTubeDownloadProgress, extract_video_id}, Message, library::Library, ui_util::{ElementContainerExtensions, ContainerStyleSheet}, settings::{SortBy, Settings}};
 use super::song_list::SongListMessage;
 
 #[derive(Debug, Clone)]
@@ -22,8 +22,6 @@ pub enum SettingsListItem {
     TopLevel,
     ChangeLibrary,
     RefreshLibrary,
-    ChangeSort(SortBy),
-    ToggleSortReverse,
 }
 
 impl Display for SettingsListItem {
@@ -32,19 +30,33 @@ impl Display for SettingsListItem {
             SettingsListItem::TopLevel => "Settings",
             SettingsListItem::ChangeLibrary => "Change library",
             SettingsListItem::RefreshLibrary => "Refresh library",
-            SettingsListItem::ChangeSort(sort) => match sort {
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum SortListItem {
+    ChangeSort(SortBy),
+    ToggleSortReverse,
+}
+
+impl Display for SortListItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SortListItem::ChangeSort(sort) => match sort {
                 SortBy::Title => "Sort by song title",
                 SortBy::Artist => "Sort by artist",
                 SortBy::Album => "Sort by album",
                 SortBy::Downloaded => "Sort by time downloaded",
             },
-            SettingsListItem::ToggleSortReverse => "Reverse current order"
+            SortListItem::ToggleSortReverse => "Reverse current order"
         })
     }
 }
 
 pub struct DownloadView {
     library: Arc<RwLock<Library>>,
+    settings: Arc<RwLock<Settings>>,
     id_input: String,
 
     pub downloads_in_progress: Vec<(YouTubeDownload, Arc<RwLock<YouTubeDownloadProgress>>)>,
@@ -52,9 +64,10 @@ pub struct DownloadView {
 }
 
 impl DownloadView {
-    pub fn new(library: Arc<RwLock<Library>>) -> Self {
+    pub fn new(library: Arc<RwLock<Library>>, settings: Arc<RwLock<Settings>>) -> Self {
         Self {
             library,
+            settings,
             id_input: "".to_string(),
             downloads_in_progress: vec![],
             download_errors: vec![],
@@ -90,21 +103,33 @@ impl DownloadView {
                         .push(
                             PickList::new(
                                 vec![
+                                    SortListItem::ChangeSort(SortBy::Title),
+                                    SortListItem::ChangeSort(SortBy::Artist),
+                                    SortListItem::ChangeSort(SortBy::Album),
+                                    SortListItem::ChangeSort(SortBy::Downloaded),
+                                    SortListItem::ToggleSortReverse,
+                                ],
+                                Some(SortListItem::ChangeSort(self.settings.read().unwrap().sort_by)),
+                                |i| match i {
+                                    SortListItem::ChangeSort(sort) => SongListMessage::ChangeSort(sort).into(),
+                                    SortListItem::ToggleSortReverse => SongListMessage::ToggleSortReverse.into(),
+                                }
+                            )
+                                .padding(10)
+                                .width(Length::Shrink)
+                        )
+                        .push(
+                            PickList::new(
+                                // TODO: put sorts in their own one
+                                vec![
                                     SettingsListItem::ChangeLibrary,
                                     SettingsListItem::RefreshLibrary,
-                                    SettingsListItem::ChangeSort(SortBy::Title),
-                                    SettingsListItem::ChangeSort(SortBy::Artist),
-                                    SettingsListItem::ChangeSort(SortBy::Album),
-                                    SettingsListItem::ChangeSort(SortBy::Downloaded),
-                                    SettingsListItem::ToggleSortReverse,
                                 ],
                                 Some(SettingsListItem::TopLevel),
                                 |i| match i {
                                     SettingsListItem::TopLevel => unreachable!(),
                                     SettingsListItem::ChangeLibrary => Message::UpdateLibraryPath,
                                     SettingsListItem::RefreshLibrary => SongListMessage::RefreshSongList.into(),
-                                    SettingsListItem::ChangeSort(sort) => SongListMessage::ChangeSort(sort).into(),
-                                    SettingsListItem::ToggleSortReverse => SongListMessage::ToggleSortReverse.into(),
                                 },
                             )
                                 .padding(10)

@@ -64,7 +64,7 @@ impl Application for MainView {
                 library: library.clone(),
                 settings: settings.clone(),
 
-                download_view: DownloadView::new(library.clone()),
+                download_view: DownloadView::new(library.clone(), settings.clone()),
                 content_view: ContentView::new(library.clone(), settings.clone()),
             },
             Command::none()
