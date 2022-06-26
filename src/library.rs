@@ -44,13 +44,15 @@ impl Library {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().map(|s| s.to_ascii_lowercase()) == Some("mp3".into()) {
+            let extension = path.extension().map(|s| s.to_ascii_lowercase());
+            if extension == Some("mp3".into()) || extension == Some("hidden".into()) {
                 let tag = Tag::read_from_path(&path);
+                let hidden = extension == Some("hidden".into());
         
                 // If there's no video ID, then this didn't come from CrossPlay, so ignore it
                 if let Ok(tag) = tag {
                     if let Ok(metadata) = Self::load_one_song_metadata(tag) {
-                        self.loaded_songs.push(Song::new(path, metadata));
+                        self.loaded_songs.push(Song::new(path, metadata, hidden));
                     }
                 }
             }
@@ -81,12 +83,44 @@ pub struct Song {
 
     /// This song's metadata, loaded from ID3 tags.
     pub metadata: SongMetadata,
+
+    /// Whether this song is hidden. This is separate from the metadata since it is encoded by the
+    /// file extension, not ID3 tags.
+    hidden: bool,
 }
 
 impl Song {
     /// Creates a new reference to a song on-disk.
-    fn new(path: PathBuf, metadata: SongMetadata) -> Self {
-        Self { path, metadata }
+    fn new(path: PathBuf, metadata: SongMetadata, hidden: bool) -> Self {
+        Self { path, metadata, hidden }
+    }
+
+    /// The path to this song assuming it is not hidden.
+    /// 
+    /// If the song is already not hidden, then this will be the same as the current path.
+    pub fn root_path(&self) -> PathBuf {
+        if self.hidden {
+            // Strip the ".hidden" off the end first
+            self.path.with_extension("")
+        } else {
+            self.path.clone()
+        }
+    }
+
+    /// Whether the current song is hidden.
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+
+    /// The path to this song if/when it is hidden.
+    /// 
+    /// If the song is already hidden, then this will be the same as the current path.
+    pub fn hidden_path(&self) -> PathBuf {
+        if self.hidden {
+            self.path.clone()
+        } else {
+            format!("{}.hidden", self.path.to_string_lossy()).into()
+        }
     }
 
     /// The path where the original of this song will be copied to, before any modifications take
@@ -95,7 +129,7 @@ impl Song {
     /// This will not exist if the song has not been modified (and thus [`create_original_copy`] has
     /// not been called).
     fn original_copy_path(&self) -> PathBuf {
-        format!("{}.original", self.path.to_string_lossy()).into()
+        format!("{}.original", self.root_path().to_string_lossy()).into()
     }
 
     /// Creates an original copy of this song, if one does not already exist. It is the caller's
@@ -119,6 +153,38 @@ impl Song {
     /// Returns true if this song's metadata indicates that it has been modified from the original.
     pub fn is_modified(&self) -> bool {
         self.metadata.is_cropped || self.metadata.is_metadata_edited
+    }
+
+    /// Hides this song. If the song is already hidden, has no effect.
+    /// 
+    /// The song list MUST be updated after this operation, or paths will break.
+    pub fn hide(mut self) -> Result<()> {
+        if self.hidden { return Ok(()) }
+
+        // Move to hidden path
+        let hidden_path = self.hidden_path();
+        std::fs::rename(&self.path, &hidden_path)?;
+
+        // Update path on self
+        self.path = hidden_path;
+
+        Ok(())
+    }
+
+    /// Unhides this song. If the song is already not hidden, has no effect.
+    /// 
+    /// The song list MUST be updated after this operation, or paths will break.
+    pub fn unhide(mut self) -> Result<()> {
+        if !self.hidden { return Ok(()) }
+
+        // Move away from hidden path
+        let new_path = self.root_path();
+        std::fs::rename(&self.path, &new_path)?;
+
+        // Update path on self
+        self.path = new_path;
+
+        Ok(())
     }
 
     /// Modifies the working copy of this song to start and end at the selected points. This is

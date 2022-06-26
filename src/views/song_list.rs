@@ -14,6 +14,7 @@ pub enum SongListMessage {
 
     RestoreOriginal(Song),
     Delete(Song),
+    ToggleHide(Song),
 }
 
 impl From<SongListMessage> for Message {
@@ -122,6 +123,48 @@ impl SongListView {
                     Command::none()
                 }
             }
+
+            SongListMessage::ToggleHide(song) => {
+                let mut need_refresh = false;
+
+                if song.is_hidden() {
+                    let confirmation = MessageDialog::new()
+                        .set_title("Unhide song?")
+                        .set_text(&format!(
+                            "The song '{}' will re-appear in media players.",
+                            song.metadata.title,
+                        ))
+                        .set_type(MessageType::Warning)
+                        .show_confirm()
+                        .unwrap();
+
+                    if confirmation {
+                        song.unhide().expect("unhide failed");
+                        need_refresh = true;
+                    }
+                } else {
+                    let confirmation = MessageDialog::new()
+                        .set_title("Hide song?")
+                        .set_text(&format!(
+                            "The song '{}' will remain downloaded and visible in CrossPlay, but will stop showing in media players.",
+                            song.metadata.title,
+                        ))
+                        .set_type(MessageType::Warning)
+                        .show_confirm()
+                        .unwrap();
+
+                    if confirmation {
+                        song.hide().expect("hide failed");
+                        need_refresh = true;
+                    }
+                }
+
+                if need_refresh {
+                    Command::perform(ready(()), |_| SongListMessage::RefreshSongList.into())
+                } else {
+                    Command::none()
+                }
+            }
         }
     }
 
@@ -199,6 +242,11 @@ impl SongView {
             .push(
                 Button::new(Image::new(if self.song.metadata.is_cropped { assets::CROP_DISABLED } else { assets::CROP }))
                     .on_press_if(!self.song.metadata.is_cropped, ContentMessage::OpenCrop(self.song.clone()).into())
+                    .width(Length::Units(40))
+            )
+            .push(
+                Button::new(Image::new(if self.song.is_hidden() { assets::HIDDEN } else { assets::NOT_HIDDEN }))
+                    .on_press(SongListMessage::ToggleHide(self.song.clone()).into())
                     .width(Length::Units(40))
             )
             .push(

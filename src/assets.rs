@@ -21,3 +21,5 @@ image!(DELETE, delete);
 image!(EDIT, edit);
 image!(RESTORE, restore);
 image!(RESTORE_DISABLED, restore_disabled);
+image!(HIDDEN, hidden);
+image!(NOT_HIDDEN, not_hidden);
